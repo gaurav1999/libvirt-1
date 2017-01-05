@@ -38,7 +38,7 @@
 # include <linux/kvm.h>
 #endif
 
-#if defined(__FreeBSD__) || defined(__APPLE__)
+#if defined(__FreeBSD__) || defined(__APPLE__) || defined(__OpenBSD__)
 # include <sys/time.h>
 # include <sys/types.h>
 # include <sys/sysctl.h>
@@ -66,7 +66,7 @@ VIR_LOG_INIT("util.hostcpu");
 #define KVM_DEVICE "/dev/kvm"
 
 
-#if defined(__FreeBSD__) || defined(__APPLE__)
+#if defined(__FreeBSD__) || defined(__APPLE__) || defined(__OpenBSD__)
 static int
 virHostCPUGetCountAppleFreeBSD(void)
 {
@@ -81,7 +81,7 @@ virHostCPUGetCountAppleFreeBSD(void)
 
     return ncpu;
 }
-#endif /* defined(__FreeBSD__) || defined(__APPLE__) */
+#endif /* defined(__FreeBSD__) || defined(__APPLE__) || defined(__OpenBSD__)*/
 
 #ifdef __FreeBSD__
 # define BSD_CPU_STATS_ALL 4
@@ -981,7 +981,7 @@ virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
  cleanup:
     VIR_FORCE_FCLOSE(cpuinfo);
     return ret;
-#elif defined(__FreeBSD__) || defined(__APPLE__)
+#elif defined(__FreeBSD__) || defined(__APPLE__) || defined(__OpenBSD__)
     unsigned long cpu_freq;
     size_t cpu_freq_len = sizeof(cpu_freq);
 
@@ -1006,6 +1006,26 @@ virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
             return -1;
         }
     }
+
+    *mhz = cpu_freq;
+# elif defined(__OpenBSD__)
+
+    int cpuspeed_mib[2] = { CTL_HW, HW_CPUSPEED };
+    unsigned long cpuspeed;
+    size_t cpuspeed_len = sizeof(cpuspeed);
+
+    if (sysctl(cpuspeed_mib, 2, &cpuspeed, &cpuspeed_len, NULL, 0) == -1) {
+        virReportSystemError(errno, "%s", _("Cannot obtain CPU frequency"));
+        return -1;
+    }
+
+/*
+    return ncpu;
+    if (sysctlbyname("hw.cpuspeed", &cpu_freq, &cpu_freq_len, NULL, 0) < 0) {
+        virReportSystemError(errno, "%s", _("cannot obtain CPU freq"));
+        return -1;
+    }
+*/
 
     *mhz = cpu_freq;
 # else

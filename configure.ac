@@ -24,7 +24,7 @@ AH_BOTTOM([#include <config-post.h>])
 AC_CONFIG_MACRO_DIR([m4])
 dnl Make automake keep quiet about wildcards & other GNUmake-isms; also keep
 dnl quiet about the fact that we intentionally cater to automake 1.9
-AM_INIT_AUTOMAKE([-Wno-portability -Wno-obsolete tar-pax no-dist-gzip dist-xz subdir-objects])
+AM_INIT_AUTOMAKE([-Wno-portability -Wno-obsolete tar-pax no-dist-gzip dist-bzip2 subdir-objects])
 dnl older automake's default of ARFLAGS=cru is noisy on newer binutils;
 dnl we don't really need the 'u' even in older toolchains.  Then there is
 dnl older libtool, which spelled it AR_FLAGS
@@ -490,6 +490,13 @@ AC_CHECK_HEADERS([linux/kvm.h])
 
 
 AM_CONDITIONAL([WITH_SETUID_RPC_CLIENT], [test "$with_lxc$with_login_shell" != "nono"])
+
+
+dnl
+dnl Checks for OpenBSD VMM driver
+dnl
+
+LIBVIRT_DRIVER_CHECK_OPENBSD_VMM
 
 
 dnl

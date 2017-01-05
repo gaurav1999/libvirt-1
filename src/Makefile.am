@@ -649,6 +649,7 @@ DRIVER_SOURCE_FILES = \
 
 STATEFUL_DRIVER_SOURCE_FILES = \
 	$(BHYVE_DRIVER_SOURCES) \
+	$(OPENBSD_VMM_DRIVER_SOURCES) \
 	$(INTERFACE_DRIVER_SOURCES) \
 	$(LIBXL_DRIVER_SOURCES) \
 	$(LXC_DRIVER_SOURCES) \
@@ -936,6 +937,11 @@ BHYVE_DRIVER_SOURCES =						\
 		bhyve/bhyve_process.c				\
 		bhyve/bhyve_process.h				\
 		bhyve/bhyve_utils.h				\
+		$(NULL)
+
+OPENBSD_VMM_DRIVER_SOURCES =					\
+		openbsd/openbsd_vmm_driver.c			\
+		openbsd/openbsd_vmm_driver.h			\
 		$(NULL)
 
 NETWORK_DRIVER_SOURCES =					\
@@ -1561,6 +1567,27 @@ libvirt_driver_bhyve_impl_la_CFLAGS = \
 libvirt_driver_bhyve_impl_la_LDFLAGS = $(AM_LDFLAGS)
 libvirt_driver_bhyve_impl_la_SOURCES = $(BHYVE_DRIVER_SOURCES)
 endif WITH_BHYVE
+
+if WITH_OPENBSD_VMM
+noinst_LTLIBRARIES += libvirt_driver_openbsd_vmm_impl.la
+libvirt_driver_openbsd_vmm_la_SOURCES =
+libvirt_driver_openbsd_vmm_la_LIBADD = libvirt_driver_openbsd_vmm_impl.la
+if WITH_DRIVER_MODULES
+mod_LTLIBRARIES += libvirt_driver_openbsd_vmm.la
+libvirt_driver_openbsd_vmm_la_LIBADD += ../gnulib/lib/libgnu.la
+libvirt_driver_openbsd_vmm_la_LDFLAGS = -module -avoid-version $(AM_LDFLAGS)
+else ! WITH_DRIVER_MODULES
+noinst_LTLIBRARIES += libvirt_driver_openbsd_vmm.la
+endif ! WITH_DRIVER_MODULES
+
+libvirt_driver_openbsd_vmm_impl_la_CFLAGS = \
+	-I$(srcdir)/access \
+	-I$(srcdir)/conf \
+	$(AM_CFLAGS)
+libvirt_driver_openbsd_vmm_impl_la_LDFLAGS = $(AM_LDFLAGS)
+libvirt_driver_openbsd_vmm_impl_la_SOURCES = $(OPENBSD_VMM_DRIVER_SOURCES)
+endif WITH_OPENBSD_VMM
+
 
 if WITH_NETWORK
 noinst_LTLIBRARIES += libvirt_driver_network_impl.la

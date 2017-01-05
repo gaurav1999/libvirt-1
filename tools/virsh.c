@@ -583,6 +583,9 @@ virshShowVersion(vshControl *ctl ATTRIBUTE_UNUSED)
 #ifdef WITH_BHYVE
     vshPrint(ctl, " Bhyve");
 #endif
+#ifdef WITH_OPENBSD_VMM
+    vshPrint(ctl, " OpenBSDVMM");
+#endif
 #ifdef WITH_TEST
     vshPrint(ctl, " Test");
 #endif

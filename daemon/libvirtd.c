@@ -83,6 +83,9 @@
 # ifdef WITH_BHYVE
 #  include "bhyve/bhyve_driver.h"
 # endif
+# ifdef WITH_OPENBSD_VMM
+#  include "openbsd/openbsd_vmm_driver.h"
+# endif
 # ifdef WITH_NETWORK
 #  include "network/bridge_driver.h"
 # endif

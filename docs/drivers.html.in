@@ -34,6 +34,7 @@
       <li><strong><a href="drvphyp.html">IBM PowerVM (phyp)</a></strong></li>
       <li><strong><a href="drvvirtuozzo.html">Virtuozzo</a></strong></li>
       <li><strong><a href="drvbhyve.html">Bhyve</a></strong> - The BSD Hypervisor</li>
+      <li><strong><a href="drvopenbsd.html">OpenBSD VMM</a></strong> - The OpenBSD VMM Hypervisor</li>
     </ul>
 
     <h2><a name="storage">Storage drivers</a></h2>

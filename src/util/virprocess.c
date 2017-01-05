@@ -43,7 +43,7 @@
 # include <sys/param.h>
 #endif
 
-#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
+#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__)
 # include <sys/sysctl.h>
 # include <sys/user.h>
 #endif
@@ -1043,6 +1043,54 @@ int virProcessGetStartTime(pid_t pid,
 
     *timestamp = (unsigned long long)p.ki_start.tv_sec;
 
+    return 0;
+
+}
+#elif defined(__OpenBSD__)
+int virProcessGetStartTime(pid_t pid,
+                           unsigned long long *timestamp)
+{
+    int mib [6];
+    size_t size;
+    struct kinfo_proc *pi;
+
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_PID;
+    mib[3] = pid;
+    mib[4] = sizeof(struct kinfo_proc);
+    mib[5] = 0;
+
+/*
+    if (sysctl(mib, 6, NULL, &size, NULL, 0) < 0) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to query process ID start time"));
+        return -1;
+    }
+
+*/
+    if ((pi = malloc(size)) == NULL) {
+        virReportSystemError(errno, "%s",
+                             _("Unable to allocate memory"));
+        return -1;
+    }
+
+    mib[5] = (int)(size / sizeof(struct kinfo_proc));
+
+    if ((sysctl (mib, 6, pi, &size, NULL, 0) < 0) ||
+       (size != sizeof (struct kinfo_proc))) {
+       if (errno == ENOMEM) {
+                free(pi);
+        }
+        virReportSystemError(errno, "%s",
+                             _("Unable to allocate memory"));
+        return -1;
+    }
+
+    //if (strlen (pi->p_ustart_sec) > 0)
+    //	*timestamp = (unsigned long long)pi.p_ustart_sec;
+
+    free(pi);
     return 0;
 
 }
