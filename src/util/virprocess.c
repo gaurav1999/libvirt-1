@@ -1061,14 +1061,12 @@ int virProcessGetStartTime(pid_t pid,
     mib[4] = sizeof(struct kinfo_proc);
     mib[5] = 0;
 
-/*
     if (sysctl(mib, 6, NULL, &size, NULL, 0) < 0) {
         virReportSystemError(errno, "%s",
                              _("Unable to query process ID start time"));
         return -1;
     }
 
-*/
     if ((pi = malloc(size)) == NULL) {
         virReportSystemError(errno, "%s",
                              _("Unable to allocate memory"));
@@ -1087,8 +1085,8 @@ int virProcessGetStartTime(pid_t pid,
         return -1;
     }
 
-    //if (strlen (pi->p_ustart_sec) > 0)
-    //	*timestamp = (unsigned long long)pi.p_ustart_sec;
+    //if (pi->p_ustart_sec > 0)
+       *timestamp = (unsigned long long)pi->p_ustart_sec;
 
     free(pi);
     return 0;

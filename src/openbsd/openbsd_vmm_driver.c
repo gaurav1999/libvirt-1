@@ -1,7 +1,7 @@
 /*
  * openbsd_driver.c: core driver methods for managing OpenBSD VM's
  *
- * Copyright (C) 2016 Sergey Bronnikov
+ * Copyright (C) 2016-2017 Sergey Bronnikov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -95,7 +95,6 @@ static void openbsdDriverUnlock(struct openbsd_driver *driver)
     virMutexUnlock(&driver->lock);
 }
 
-
 static int openbsdSetInitialConfig(virDomainDefPtr vmdef)
 {
     int ret = -1;
@@ -113,7 +112,6 @@ static int openbsdSetInitialConfig(virDomainDefPtr vmdef)
 
  	return ret;
 }
-
 
 static virDomainPtr openbsdDomainLookupByID(virConnectPtr conn,
                                            int id)
@@ -575,15 +573,11 @@ openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fl
 }
 */
 
-
-/*
 static virDomainPtr
 openbsdDomainDefineXML(virConnectPtr conn, const char *xml)
 {
     return openbsdDomainDefineXMLFlags(conn, xml, 0);
 }
-*/
-
 
 static virDomainPtr
 openbsdDomainCreateXML(virConnectPtr conn, const char *xml,

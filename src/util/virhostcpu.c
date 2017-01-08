@@ -982,8 +982,6 @@ virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
     VIR_FORCE_FCLOSE(cpuinfo);
     return ret;
 #elif defined(__FreeBSD__) || defined(__APPLE__) || defined(__OpenBSD__)
-    unsigned long cpu_freq;
-    size_t cpu_freq_len = sizeof(cpu_freq);
 
     *cpus = virHostCPUGetCountAppleFreeBSD();
     if (*cpus == -1)
@@ -995,6 +993,8 @@ virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
     *threads = 1;
 
 # ifdef __FreeBSD__
+    size_t cpu_freq_len = sizeof(cpu_freq);
+    unsigned long cpu_freq;
     /* dev.cpu.%d.freq reports current active CPU frequency. It is provided by
      * the cpufreq(4) framework. However, it might be disabled or no driver
      * available. In this case fallback to "hw.clockrate" which reports boot time
@@ -1011,7 +1011,7 @@ virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
 # elif defined(__OpenBSD__)
 
     int cpuspeed_mib[2] = { CTL_HW, HW_CPUSPEED };
-    unsigned long cpuspeed;
+    int cpuspeed;
     size_t cpuspeed_len = sizeof(cpuspeed);
 
     if (sysctl(cpuspeed_mib, 2, &cpuspeed, &cpuspeed_len, NULL, 0) == -1) {
@@ -1019,15 +1019,7 @@ virHostCPUGetInfo(virArch hostarch ATTRIBUTE_UNUSED,
         return -1;
     }
 
-/*
-    return ncpu;
-    if (sysctlbyname("hw.cpuspeed", &cpu_freq, &cpu_freq_len, NULL, 0) < 0) {
-        virReportSystemError(errno, "%s", _("cannot obtain CPU freq"));
-        return -1;
-    }
-*/
-
-    *mhz = cpu_freq;
+    *mhz = cpuspeed;
 # else
     if (sysctlbyname("hw.cpufrequency", &cpu_freq, &cpu_freq_len, NULL, 0) < 0) {
         virReportSystemError(errno, "%s", _("cannot obtain CPU freq"));

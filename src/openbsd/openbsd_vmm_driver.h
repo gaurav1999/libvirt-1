@@ -1,7 +1,7 @@
 /*
  * openbsd_vmm_driver.h: core driver methods for managing OpenBSD guests
  *
- * Copyright (C) 2016 Sergey Bronnikov
+ * Copyright (C) 2016-2017 Sergey Bronnikov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
