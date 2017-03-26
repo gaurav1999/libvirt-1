@@ -39,6 +39,9 @@ bhyveCollectPCIAddress(virDomainDefPtr def ATTRIBUTE_UNUSED,
                        void *opaque)
 {
     int ret = -1;
+    if (info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE)
+        return 0;
+
     virDomainPCIAddressSetPtr addrs = opaque;
     virPCIDeviceAddressPtr addr = &info->addr.pci;
 
@@ -53,8 +56,10 @@ bhyveCollectPCIAddress(virDomainDefPtr def ATTRIBUTE_UNUSED,
         }
     }
 
-    if (virDomainPCIAddressReserveSlot(addrs, addr, VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0)
+    if (virDomainPCIAddressReserveAddr(addrs, addr,
+                                       VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0) {
         goto cleanup;
+    }
 
     ret = 0;
  cleanup:
@@ -94,41 +99,62 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
     memset(&lpc_addr, 0, sizeof(lpc_addr));
     lpc_addr.slot = 0x1;
 
-    if (virDomainPCIAddressReserveSlot(addrs, &lpc_addr, VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0)
+    if (virDomainPCIAddressReserveAddr(addrs, &lpc_addr,
+                                       VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0) {
         goto error;
-
-    for (i = 0; i < def->nnets; i++) {
-        if (!virDeviceInfoPCIAddressWanted(&def->nets[i]->info))
-            continue;
-        if (virDomainPCIAddressReserveNextSlot(addrs,
-                                               &def->nets[i]->info,
-                                               VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0)
-            goto error;
-    }
-
-    for (i = 0; i < def->ndisks; i++) {
-        if (def->disks[i]->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI &&
-            !virPCIDeviceAddressIsEmpty(&def->disks[i]->info.addr.pci))
-            continue;
-        if (virDomainPCIAddressReserveNextSlot(addrs,
-                                               &def->disks[i]->info,
-                                               VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0)
-            goto error;
     }
 
     for (i = 0; i < def->ncontrollers; i++) {
-        if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI) {
+        if ((def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI) ||
+            (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SATA)) {
             if (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT ||
                 !virDeviceInfoPCIAddressWanted(&def->controllers[i]->info))
                 continue;
 
-            if (virDomainPCIAddressReserveNextSlot(addrs,
+            if (virDomainPCIAddressReserveNextAddr(addrs,
                                                    &def->controllers[i]->info,
-                                                   VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0)
+                                                   VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
+                                                   -1) < 0)
                 goto error;
         }
-
     }
+
+    for (i = 0; i < def->nnets; i++) {
+        if (!virDeviceInfoPCIAddressWanted(&def->nets[i]->info))
+            continue;
+        if (virDomainPCIAddressReserveNextAddr(addrs,
+                                               &def->nets[i]->info,
+                                               VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
+                                               -1) < 0)
+            goto error;
+    }
+
+    for (i = 0; i < def->ndisks; i++) {
+        /* We only handle virtio disk addresses as SATA disks are
+         * attached to a controller and don't have their own PCI
+         * addresses */
+        if (def->disks[i]->bus != VIR_DOMAIN_DISK_BUS_VIRTIO)
+            continue;
+
+        if (def->disks[i]->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI &&
+            !virPCIDeviceAddressIsEmpty(&def->disks[i]->info.addr.pci))
+            continue;
+        if (virDomainPCIAddressReserveNextAddr(addrs, &def->disks[i]->info,
+                                               VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
+                                               -1) < 0)
+            goto error;
+    }
+
+    for (i = 0; i < def->nvideos; i++) {
+        if (!virDeviceInfoPCIAddressWanted(&def->videos[i]->info))
+            continue;
+        if (virDomainPCIAddressReserveNextAddr(addrs,
+                                               &def->videos[i]->info,
+                                               VIR_PCI_CONNECT_TYPE_PCI_DEVICE,
+                                               -1) < 0)
+            goto error;
+    }
+
 
     return 0;
 

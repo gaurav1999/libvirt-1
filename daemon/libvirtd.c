@@ -58,6 +58,7 @@
 #include "viraccessmanager.h"
 #include "virutil.h"
 #include "virgettext.h"
+#include "util/virnetdevopenvswitch.h"
 
 #ifdef WITH_DRIVER_MODULES
 # include "driver.h"
@@ -344,6 +345,14 @@ static int daemonErrorLogFilter(virErrorPtr err, int priority)
     return priority;
 }
 
+
+#ifdef WITH_DRIVER_MODULES
+# define VIR_DAEMON_LOAD_MODULE(func, module) \
+    virDriverLoadModule(module, #func)
+#else
+# define VIR_DAEMON_LOAD_MODULE(func, module) \
+    func()
+#endif
 static void daemonInitialize(void)
 {
     /*
@@ -353,99 +362,55 @@ static void daemonInitialize(void)
      * driver, since their resources must be auto-started before any
      * domains can be auto-started.
      */
-#ifdef WITH_DRIVER_MODULES
     /* We don't care if any of these fail, because the whole point
      * is to allow users to only install modules they want to use.
      * If they try to open a connection for a module that
      * is not loaded they'll get a suitable error at that point
      */
-# ifdef WITH_NETWORK
-    virDriverLoadModule("network");
-# endif
-# ifdef WITH_INTERFACE
-    virDriverLoadModule("interface");
-# endif
-# ifdef WITH_STORAGE
-    virDriverLoadModule("storage");
-# endif
-# ifdef WITH_NODE_DEVICES
-    virDriverLoadModule("nodedev");
-# endif
-# ifdef WITH_SECRETS
-    virDriverLoadModule("secret");
-# endif
-# ifdef WITH_NWFILTER
-    virDriverLoadModule("nwfilter");
-# endif
-# ifdef WITH_XEN
-    virDriverLoadModule("xen");
-# endif
-# ifdef WITH_LIBXL
-    virDriverLoadModule("libxl");
-# endif
-# ifdef WITH_QEMU
-    virDriverLoadModule("qemu");
-# endif
-# ifdef WITH_LXC
-    virDriverLoadModule("lxc");
-# endif
-# ifdef WITH_UML
-    virDriverLoadModule("uml");
-# endif
-# ifdef WITH_VBOX
-    virDriverLoadModule("vbox");
-# endif
-# ifdef WITH_BHYVE
-    virDriverLoadModule("bhyve");
-# endif
-# ifdef WITH_VZ
-    virDriverLoadModule("vz");
-# endif
-#else
-# ifdef WITH_NETWORK
-    networkRegister();
-# endif
-# ifdef WITH_INTERFACE
-    interfaceRegister();
-# endif
-# ifdef WITH_STORAGE
-    storageRegister();
-# endif
-# ifdef WITH_NODE_DEVICES
-    nodedevRegister();
-# endif
-# ifdef WITH_SECRETS
-    secretRegister();
-# endif
-# ifdef WITH_NWFILTER
-    nwfilterRegister();
-# endif
-# ifdef WITH_XEN
-    xenRegister();
-# endif
-# ifdef WITH_LIBXL
-    libxlRegister();
-# endif
-# ifdef WITH_QEMU
-    qemuRegister();
-# endif
-# ifdef WITH_LXC
-    lxcRegister();
-# endif
-# ifdef WITH_UML
-    umlRegister();
-# endif
-# ifdef WITH_VBOX
-    vboxRegister();
-# endif
-# ifdef WITH_BHYVE
-    bhyveRegister();
-# endif
-# ifdef WITH_VZ
-    vzRegister();
-# endif
+#ifdef WITH_NETWORK
+    VIR_DAEMON_LOAD_MODULE(networkRegister, "network");
+#endif
+#ifdef WITH_INTERFACE
+    VIR_DAEMON_LOAD_MODULE(interfaceRegister, "interface");
+#endif
+#ifdef WITH_STORAGE
+    VIR_DAEMON_LOAD_MODULE(storageRegister, "storage");
+#endif
+#ifdef WITH_NODE_DEVICES
+    VIR_DAEMON_LOAD_MODULE(nodedevRegister, "nodedev");
+#endif
+#ifdef WITH_SECRETS
+    VIR_DAEMON_LOAD_MODULE(secretRegister, "secret");
+#endif
+#ifdef WITH_NWFILTER
+    VIR_DAEMON_LOAD_MODULE(nwfilterRegister, "nwfilter");
+#endif
+#ifdef WITH_XEN
+    VIR_DAEMON_LOAD_MODULE(xenRegister, "xen");
+#endif
+#ifdef WITH_LIBXL
+    VIR_DAEMON_LOAD_MODULE(libxlRegister, "libxl");
+#endif
+#ifdef WITH_QEMU
+    VIR_DAEMON_LOAD_MODULE(qemuRegister, "qemu");
+#endif
+#ifdef WITH_LXC
+    VIR_DAEMON_LOAD_MODULE(lxcRegister, "lxc");
+#endif
+#ifdef WITH_UML
+    VIR_DAEMON_LOAD_MODULE(umlRegister, "uml");
+#endif
+#ifdef WITH_VBOX
+    VIR_DAEMON_LOAD_MODULE(vboxRegister, "vbox");
+#endif
+#ifdef WITH_BHYVE
+    VIR_DAEMON_LOAD_MODULE(bhyveRegister, "bhyve");
+#endif
+#ifdef WITH_VZ
+    VIR_DAEMON_LOAD_MODULE(vzRegister, "vz");
 #endif
 }
+#undef VIR_DAEMON_LOAD_MODULE
 
 
 static int ATTRIBUTE_NONNULL(3)
@@ -582,6 +547,23 @@ daemonSetupNetworking(virNetServerPtr srv,
             if (config->ca_file ||
                 config->cert_file ||
                 config->key_file) {
+                if (!config->ca_file) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                   _("No CA certificate path set to match server key/cert"));
+                    goto cleanup;
+                }
+                if (!config->cert_file) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                   _("No server certificate path set to match server key"));
+                    goto cleanup;
+                }
+                if (!config->key_file) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                   _("No server key path set to match server cert"));
+                    goto cleanup;
+                }
+                VIR_DEBUG("Using CA='%s' cert='%s' key='%s'",
+                          config->ca_file, config->cert_file, config->key_file);
                 if (!(ctxt = virNetTLSContextNewServer(config->ca_file,
                                                        config->crl_file,
                                                        config->cert_file,
@@ -657,6 +639,16 @@ daemonSetupNetworking(virNetServerPtr srv,
     virObjectUnref(svcAdm);
     virObjectUnref(svc);
     return ret;
+}
+
+
+/*
+ * Set up the openvswitch timeout
+ */
+static void
+daemonSetupNetDevOpenvswitch(struct daemonConfig *config)
+{
+    virNetDevOpenvswitchSetTimeout(config->ovs_timeout);
 }
 
 
@@ -1269,6 +1261,8 @@ int main(int argc, char **argv) {
         VIR_ERROR(_("Can't initialize logging"));
         exit(EXIT_FAILURE);
     }
+
+    daemonSetupNetDevOpenvswitch(config);
 
     if (daemonSetupAccessManager(config) < 0) {
         VIR_ERROR(_("Can't initialize access manager"));

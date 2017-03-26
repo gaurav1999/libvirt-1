@@ -66,10 +66,10 @@ fillAllCaps(virDomainCapsPtr domCaps)
     virDomainCapsDeviceVideoPtr video = &domCaps->video;
     virDomainCapsDeviceHostdevPtr hostdev = &domCaps->hostdev;
     virCPUDef host = {
-        VIR_CPU_TYPE_HOST, 0, 0,
-        VIR_ARCH_X86_64, (char *) "host",
-        NULL, 0, (char *) "CPU Vendorrr",
-        0, 0, 0, 0, 0, NULL,
+        .type = VIR_CPU_TYPE_HOST,
+        .arch = VIR_ARCH_X86_64,
+        .model = (char *) "host",
+        .vendor = (char *) "CPU Vendorrr",
     };
 
     domCaps->maxvcpus = 255;
@@ -119,19 +119,35 @@ fillAllCaps(virDomainCapsPtr domCaps)
 # include "testutilsqemu.h"
 
 static virCPUDef aarch64Cpu = {
-    0, 0, 0, 0, NULL, NULL, 0, NULL, 1, 1, 1, 0, 0, NULL,
+    .sockets = 1,
+    .cores = 1,
+    .threads = 1,
 };
 
 static virCPUDef ppc64leCpu = {
-    VIR_CPU_TYPE_HOST, 0, 0,
-    VIR_ARCH_PPC64LE, (char *) "POWER8",
-    NULL, 0, NULL, 1, 1, 1, 0, 0, NULL,
+    .type = VIR_CPU_TYPE_HOST,
+    .arch = VIR_ARCH_PPC64LE,
+    .model = (char *) "POWER8",
+    .sockets = 1,
+    .cores = 1,
+    .threads = 1,
 };
 
 static virCPUDef x86Cpu = {
-    VIR_CPU_TYPE_HOST, 0, 0,
-    VIR_ARCH_X86_64, (char *) "Broadwell",
-    NULL, 0, NULL, 1, 1, 1, 0, 0, NULL,
+    .type = VIR_CPU_TYPE_HOST,
+    .arch = VIR_ARCH_X86_64,
+    .model = (char *) "Broadwell",
+    .sockets = 1,
+    .cores = 1,
+    .threads = 1,
+};
+
+static virCPUDef s390Cpu = {
+    .type = VIR_CPU_TYPE_HOST,
+    .arch = VIR_ARCH_S390X,
+    .sockets = 1,
+    .cores = 1,
+    .threads = 1,
 };
 
 static int
@@ -151,6 +167,10 @@ fakeHostCPU(virCapsPtr caps,
 
     case VIR_ARCH_X86_64:
         cpu = &x86Cpu;
+        break;
+
+    case VIR_ARCH_S390X:
+        cpu = &s390Cpu;
         break;
 
     default:
@@ -443,6 +463,22 @@ mymain(void)
                  "/usr/bin/qemu-system-x86_64", NULL,
                  "x86_64", VIR_DOMAIN_VIRT_QEMU);
 
+    DO_TEST_QEMU("2.9.0", "caps_2.9.0",
+                 "/usr/bin/qemu-system-x86_64", NULL,
+                 "x86_64", VIR_DOMAIN_VIRT_KVM);
+
+    DO_TEST_QEMU("2.9.0-tcg", "caps_2.9.0",
+                 "/usr/bin/qemu-system-x86_64", NULL,
+                 "x86_64", VIR_DOMAIN_VIRT_QEMU);
+
+    DO_TEST_QEMU("2.7.0", "caps_2.7.0",
+                 "/usr/bin/qemu-system-s390x", NULL,
+                 "s390x", VIR_DOMAIN_VIRT_KVM);
+
+    DO_TEST_QEMU("2.8.0", "caps_2.8.0",
+                 "/usr/bin/qemu-system-s390x", NULL,
+                 "s390x", VIR_DOMAIN_VIRT_KVM);
+
 #endif /* WITH_QEMU */
 
 #if WITH_LIBXL
@@ -465,4 +501,10 @@ mymain(void)
     return ret;
 }
 
+#if WITH_QEMU
+VIRT_TEST_MAIN_PRELOAD(mymain,
+                       abs_builddir "/.libs/domaincapsmock.so",
+                       abs_builddir "/.libs/qemucpumock.so")
+#else
 VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/domaincapsmock.so")
+#endif

@@ -240,7 +240,7 @@ cpuDecode(virCPUDefPtr cpu,
         return -1;
     }
 
-    if ((driver = cpuGetSubDriver(cpu->arch)) == NULL)
+    if ((driver = cpuGetSubDriver(data->arch)) == NULL)
         return -1;
 
     if (driver->decode == NULL) {
@@ -312,7 +312,26 @@ cpuEncode(virArch arch,
 
 
 /**
- * cpuDataFree:
+ * virCPUDataNew:
+ *
+ * Returns an allocated memory for virCPUData or NULL on error.
+ */
+virCPUDataPtr
+virCPUDataNew(virArch arch)
+{
+    virCPUDataPtr data;
+
+    if (VIR_ALLOC(data) < 0)
+        return NULL;
+
+    data->arch = arch;
+
+    return data;
+}
+
+
+/**
+ * virCPUDataFree:
  *
  * @data: CPU data structure to be freed
  *
@@ -321,54 +340,125 @@ cpuEncode(virArch arch,
  * Returns nothing.
  */
 void
-cpuDataFree(virCPUDataPtr data)
+virCPUDataFree(virCPUDataPtr data)
 {
     struct cpuArchDriver *driver;
 
     VIR_DEBUG("data=%p", data);
 
-    if (data == NULL)
+    if (!data)
         return;
 
-    if ((driver = cpuGetSubDriver(data->arch)) == NULL)
-        return;
-
-    if (driver->free == NULL) {
-        virReportError(VIR_ERR_NO_SUPPORT,
-                       _("cannot free CPU data for %s architecture"),
-                       virArchToString(data->arch));
-        return;
-    }
-
-    (driver->free)(data);
+    if ((driver = cpuGetSubDriver(data->arch)) && driver->dataFree)
+        driver->dataFree(data);
+    else
+        VIR_FREE(data);
 }
 
 
 /**
- * cpuNodeData:
+ * virCPUGetHost:
  *
  * @arch: CPU architecture
+ * @type: requested type of the CPU
+ * @nodeInfo: simplified CPU topology (optional)
+ * @models: list of CPU models that can be considered for host CPU
+ * @nmodels: number of CPU models in @models
  *
- * Returns CPU data for host CPU or NULL on error.
+ * Create CPU definition describing the host's CPU.
+ *
+ * The @type (either VIR_CPU_TYPE_HOST or VIR_CPU_TYPE_GUEST) specifies what
+ * type of CPU definition should be created. Specifically, VIR_CPU_TYPE_HOST
+ * CPUs may contain only features without any policy attribute. Requesting
+ * VIR_CPU_TYPE_GUEST provides better results because the CPU is allowed to
+ * contain disabled features.
+ *
+ * If @nodeInfo is not NULL (which is only allowed for VIR_CPU_TYPE_HOST CPUs),
+ * the CPU definition will have topology (sockets, cores, threads) filled in
+ * according to the content of @nodeInfo. The function fails only if @nodeInfo
+ * was not passed in and the assigned CPU driver was not able to detect the
+ * host CPU model. In other words, a CPU definition containing just the
+ * topology is a successful result even if detecting the host CPU model fails.
+ *
+ * It possible to limit the CPU model which may appear in the created CPU
+ * definition by passing non-NULL @models list. This is useful when requesting
+ * a CPU model usable on a specific hypervisor. If @models is NULL, any CPU
+ * model known to libvirt may appear in the result.
+ *
+ * Returns host CPU definition or NULL on error.
  */
-virCPUDataPtr
-cpuNodeData(virArch arch)
+virCPUDefPtr
+virCPUGetHost(virArch arch,
+              virCPUType type,
+              virNodeInfoPtr nodeInfo,
+              const char **models,
+              unsigned int nmodels)
 {
     struct cpuArchDriver *driver;
+    virCPUDefPtr cpu = NULL;
 
-    VIR_DEBUG("arch=%s", virArchToString(arch));
+    VIR_DEBUG("arch=%s, type=%s, nodeInfo=%p, models=%p, nmodels=%u",
+              virArchToString(arch), virCPUTypeToString(type), nodeInfo,
+              models, nmodels);
 
-    if ((driver = cpuGetSubDriver(arch)) == NULL)
+    if (!(driver = cpuGetSubDriver(arch)))
         return NULL;
 
-    if (driver->nodeData == NULL) {
-        virReportError(VIR_ERR_NO_SUPPORT,
-                       _("cannot get node CPU data for %s architecture"),
-                       virArchToString(arch));
+    if (VIR_ALLOC(cpu) < 0)
         return NULL;
+
+    switch (type) {
+    case VIR_CPU_TYPE_HOST:
+        cpu->arch = arch;
+        cpu->type = type;
+        break;
+
+    case VIR_CPU_TYPE_GUEST:
+        if (nodeInfo) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("cannot set topology for CPU type '%s'"),
+                           virCPUTypeToString(type));
+            goto error;
+        }
+        cpu->type = type;
+        break;
+
+    case VIR_CPU_TYPE_AUTO:
+    case VIR_CPU_TYPE_LAST:
+        virReportError(VIR_ERR_INVALID_ARG,
+                       _("unsupported CPU type: %s"),
+                       virCPUTypeToString(type));
+        goto error;
     }
 
-    return driver->nodeData(arch);
+    if (nodeInfo) {
+        cpu->sockets = nodeInfo->sockets;
+        cpu->cores = nodeInfo->cores;
+        cpu->threads = nodeInfo->threads;
+    }
+
+    /* Try to get the host CPU model, but don't really fail if nodeInfo is
+     * filled in.
+     */
+    if (driver->getHost) {
+        if (driver->getHost(cpu, models, nmodels) < 0 &&
+            !nodeInfo)
+            goto error;
+    } else if (nodeInfo) {
+        VIR_DEBUG("cannot detect host CPU model for %s architecture",
+                  virArchToString(arch));
+    } else {
+        virReportError(VIR_ERR_NO_SUPPORT,
+                       _("cannot detect host CPU model for %s architecture"),
+                       virArchToString(arch));
+        goto error;
+    }
+
+    return cpu;
+
+ error:
+    virCPUDefFree(cpu);
+    return NULL;
 }
 
 
@@ -618,6 +708,51 @@ virCPUUpdate(virArch arch,
         return -1;
 
     VIR_DEBUG("model=%s", NULLSTR(guest->model));
+    return 0;
+}
+
+
+/**
+ * virCPUUpdateLive:
+ *
+ * @arch: CPU architecture
+ * @cpu: guest CPU definition to be updated
+ * @dataEnabled: CPU data of the virtual CPU
+ * @dataDisabled: CPU data with features requested by @cpu but disabled by the
+ *                hypervisor
+ *
+ * Update custom mode CPU according to the virtual CPU created by the
+ * hypervisor. The function refuses to update the CPU in case cpu->check is set
+ * to VIR_CPU_CHECK_FULL.
+ *
+ * Returns -1 on error,
+ *          0 when the CPU was successfully updated,
+ *          1 when the operation does not make sense on the CPU or it is not
+ *            supported for the given architecture.
+ */
+int
+virCPUUpdateLive(virArch arch,
+                 virCPUDefPtr cpu,
+                 virCPUDataPtr dataEnabled,
+                 virCPUDataPtr dataDisabled)
+{
+    struct cpuArchDriver *driver;
+
+    VIR_DEBUG("arch=%s, cpu=%p, dataEnabled=%p, dataDisabled=%p",
+              virArchToString(arch), cpu, dataEnabled, dataDisabled);
+
+    if (!(driver = cpuGetSubDriver(arch)))
+        return -1;
+
+    if (!driver->updateLive)
+        return 1;
+
+    if (cpu->mode != VIR_CPU_MODE_CUSTOM)
+        return 1;
+
+    if (driver->updateLive(cpu, dataEnabled, dataDisabled) < 0)
+        return -1;
+
     return 0;
 }
 

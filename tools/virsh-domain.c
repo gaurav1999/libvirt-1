@@ -1264,6 +1264,10 @@ static const vshCmdOptDef opts_blkdeviotune[] = {
      .help = N_("I/O size in bytes")
     },
     {.name = "group_name",
+     .type = VSH_OT_ALIAS,
+     .help = "group-name"
+    },
+    {.name = "group-name",
      .type = VSH_OT_STRING,
      .help = N_("group name to share I/O quota between multiple drives")
     },
@@ -1398,11 +1402,12 @@ cmdBlkdeviotune(vshControl *ctl, const vshCmd *cmd)
     VSH_ADD_IOTUNE(write-iops-sec-max-length, WRITE_IOPS_SEC_MAX_LENGTH);
 #undef VSH_ADD_IOTUNE
 
-    rv = vshCommandOptStringReq(ctl, cmd, "group_name", &group_name);
-    if (rv < 0) {
-        vshError(ctl, "%s", _("Unable to parse group parameter"));
+    if (vshCommandOptStringReq(ctl, cmd, "group-name", &group_name) < 0) {
+        vshError(ctl, "%s", _("Unable to parse group-name parameter"));
         goto cleanup;
-    } else if (rv > 0) {
+    }
+
+    if (group_name) {
         if (virTypedParamsAddString(&params, &nparams, &maxparams,
                                     VIR_DOMAIN_BLOCK_IOTUNE_GROUP_NAME,
                                     group_name) < 0)
@@ -7010,6 +7015,88 @@ cmdGuestvcpus(vshControl *ctl, const vshCmd *cmd)
 
 
 /*
+ * "setvcpu" command
+ */
+static const vshCmdInfo info_setvcpu[] = {
+    {.name = "help",
+     .data = N_("attach/detach vcpu or groups of threads")
+    },
+    {.name = "desc",
+     .data = N_("Add or remove vcpus")
+    },
+    {.name = NULL}
+};
+
+static const vshCmdOptDef opts_setvcpu[] = {
+    VIRSH_COMMON_OPT_DOMAIN_FULL,
+    {.name = "vcpulist",
+     .type = VSH_OT_DATA,
+     .flags = VSH_OFLAG_REQ,
+     .help = N_("ids of vcpus to manipulate")
+    },
+    {.name = "enable",
+     .type = VSH_OT_BOOL,
+     .help = N_("enable cpus specified by cpumap")
+    },
+    {.name = "disable",
+     .type = VSH_OT_BOOL,
+     .help = N_("disable cpus specified by cpumap")
+    },
+    VIRSH_COMMON_OPT_DOMAIN_CONFIG,
+    VIRSH_COMMON_OPT_DOMAIN_LIVE,
+    VIRSH_COMMON_OPT_DOMAIN_CURRENT,
+    {.name = NULL}
+};
+
+static bool
+cmdSetvcpu(vshControl *ctl, const vshCmd *cmd)
+{
+    virDomainPtr dom;
+    bool enable = vshCommandOptBool(cmd, "enable");
+    bool disable = vshCommandOptBool(cmd, "disable");
+    bool config = vshCommandOptBool(cmd, "config");
+    bool live = vshCommandOptBool(cmd, "live");
+    const char *vcpulist = NULL;
+    int state = 0;
+    bool ret = false;
+    unsigned int flags = VIR_DOMAIN_AFFECT_CURRENT;
+
+    VSH_EXCLUSIVE_OPTIONS_VAR(enable, disable);
+
+    VSH_EXCLUSIVE_OPTIONS("current", "live");
+    VSH_EXCLUSIVE_OPTIONS("current", "config");
+
+    if (config)
+        flags |= VIR_DOMAIN_AFFECT_CONFIG;
+    if (live)
+        flags |= VIR_DOMAIN_AFFECT_LIVE;
+
+    if (!(enable || disable)) {
+        vshError(ctl, "%s", _("one of --enable, --disable is required"));
+        return false;
+    }
+
+    if (vshCommandOptStringReq(ctl, cmd, "vcpulist", &vcpulist))
+        return false;
+
+    if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
+        return false;
+
+    if (enable)
+        state = 1;
+
+    if (virDomainSetVcpu(dom, vcpulist, state, flags) < 0)
+        goto cleanup;
+
+    ret = true;
+
+ cleanup:
+    virDomainFree(dom);
+    return ret;
+}
+
+
+/*
  * "iothreadinfo" command
  */
 static const vshCmdInfo info_iothreadinfo[] = {
@@ -8848,13 +8935,27 @@ virshParseEventStr(const char *event,
     return ret;
 }
 
+static void
+virshPrintPerfStatus(vshControl *ctl, virTypedParameterPtr params, int nparams)
+{
+    size_t i;
+
+    for (i = 0; i < nparams; i++) {
+        if (params[i].type == VIR_TYPED_PARAM_BOOLEAN &&
+            params[i].value.b) {
+            vshPrintExtra(ctl, "%-15s: %s\n", params[i].field, _("enabled"));
+        } else {
+            vshPrintExtra(ctl, "%-15s: %s\n", params[i].field, _("disabled"));
+        }
+    }
+}
+
 static bool
 cmdPerf(vshControl *ctl, const vshCmd *cmd)
 {
     virDomainPtr dom;
     int nparams = 0;
     int maxparams = 0;
-    size_t i;
     virTypedParameterPtr params = NULL;
     bool ret = false;
     const char *enable = NULL, *disable = NULL;
@@ -8891,18 +8992,13 @@ cmdPerf(vshControl *ctl, const vshCmd *cmd)
             vshError(ctl, "%s", _("Unable to get perf events"));
             goto cleanup;
         }
-        for (i = 0; i < nparams; i++) {
-            if (params[i].type == VIR_TYPED_PARAM_BOOLEAN &&
-                params[i].value.b) {
-                vshPrint(ctl, "%-15s: %s\n", params[i].field, _("enabled"));
-            } else {
-                vshPrint(ctl, "%-15s: %s\n", params[i].field, _("disabled"));
-            }
-        }
+        virshPrintPerfStatus(ctl, params, nparams);
     } else {
         if (virDomainSetPerfEvents(dom, params, nparams, flags) != 0) {
             vshError(ctl, "%s", _("Unable to enable/disable perf events"));
             goto cleanup;
+        } else {
+            virshPrintPerfStatus(ctl, params, nparams);
         }
     }
 
@@ -12750,6 +12846,29 @@ virshEventDeviceRemovalFailedPrint(virConnectPtr conn ATTRIBUTE_UNUSED,
     virshEventPrint(opaque, &buf);
 }
 
+VIR_ENUM_DECL(virshEventMetadataChangeType)
+VIR_ENUM_IMPL(virshEventMetadataChangeType,
+              VIR_DOMAIN_METADATA_LAST,
+              N_("description"),
+              N_("title"),
+              N_("element"))
+
+static void
+virshEventMetadataChangePrint(virConnectPtr conn ATTRIBUTE_UNUSED,
+                              virDomainPtr dom,
+                              int type,
+                              const char *nsuri,
+                              void *opaque)
+{
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+
+    virBufferAsprintf(&buf, _("event 'metdata-change' for domain %s: %s %s\n"),
+                      virDomainGetName(dom),
+                      UNKNOWNSTR(virshEventMetadataChangeTypeTypeToString(type)),
+                      NULLSTR(nsuri));
+    virshEventPrint(opaque, &buf);
+}
+
 
 static vshEventCallback vshEventCallbacks[] = {
     { "lifecycle",
@@ -12796,6 +12915,8 @@ static vshEventCallback vshEventCallbacks[] = {
       VIR_DOMAIN_EVENT_CALLBACK(virshEventJobCompletedPrint), },
     { "device-removal-failed",
       VIR_DOMAIN_EVENT_CALLBACK(virshEventDeviceRemovalFailedPrint), },
+    { "metadata-change",
+      VIR_DOMAIN_EVENT_CALLBACK(virshEventMetadataChangePrint), },
 };
 verify(VIR_DOMAIN_EVENT_ID_LAST == ARRAY_CARDINALITY(vshEventCallbacks));
 
@@ -13910,6 +14031,12 @@ const vshCmdDef domManagementCmds[] = {
      .handler = cmdGuestvcpus,
      .opts = opts_guestvcpus,
      .info = info_guestvcpus,
+     .flags = 0
+    },
+    {.name = "setvcpu",
+     .handler = cmdSetvcpu,
+     .opts = opts_setvcpu,
+     .info = info_setvcpu,
      .flags = 0
     },
     {.name = NULL}

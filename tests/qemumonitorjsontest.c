@@ -1407,7 +1407,7 @@ testQemuMonitorJSONqemuMonitorJSONQueryCPUs(const void *data)
         goto cleanup;
 
     if (qemuMonitorJSONQueryCPUs(qemuMonitorTestGetMonitor(test),
-                                 &cpudata, &ncpudata) < 0)
+                                 &cpudata, &ncpudata, true) < 0)
         goto cleanup;
 
     if (ncpudata != 4) {
@@ -2395,7 +2395,7 @@ testQemuMonitorJSONGetCPUData(const void *opaque)
 
     if (qemuMonitorJSONGetGuestCPU(qemuMonitorTestGetMonitor(test),
                                    VIR_ARCH_X86_64,
-                                   &cpuData) < 0)
+                                   &cpuData, NULL) < 0)
         goto cleanup;
 
     if (!(actual = virCPUDataFormat(cpuData)))
@@ -2410,7 +2410,7 @@ testQemuMonitorJSONGetCPUData(const void *opaque)
     VIR_FREE(dataFile);
     VIR_FREE(jsonStr);
     VIR_FREE(actual);
-    cpuDataFree(cpuData);
+    virCPUDataFree(cpuData);
     qemuMonitorTestFree(test);
     return ret;
 }
@@ -2438,7 +2438,7 @@ testQemuMonitorJSONGetNonExistingCPUData(const void *opaque)
 
     rv = qemuMonitorJSONGetGuestCPU(qemuMonitorTestGetMonitor(test),
                                    VIR_ARCH_X86_64,
-                                   &cpuData);
+                                   &cpuData, NULL);
     if (rv != -2) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "Unexpected return value %d, expecting -2", rv);
@@ -2455,7 +2455,7 @@ testQemuMonitorJSONGetNonExistingCPUData(const void *opaque)
     ret = 0;
  cleanup:
     qemuMonitorTestFree(test);
-    cpuDataFree(cpuData);
+    virCPUDataFree(cpuData);
     return ret;
 }
 

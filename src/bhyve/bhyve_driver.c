@@ -55,6 +55,7 @@
 #include "virhostmem.h"
 #include "conf/domain_capabilities.h"
 
+#include "bhyve_conf.h"
 #include "bhyve_device.h"
 #include "bhyve_driver.h"
 #include "bhyve_command.h"
@@ -734,15 +735,34 @@ bhyveConnectDomainXMLToNative(virConnectPtr conn,
     if (bhyveDomainAssignAddresses(def, NULL) < 0)
         goto cleanup;
 
-    if (!(loadcmd = virBhyveProcessBuildLoadCmd(conn, def, "<device.map>",
+    if (def->os.bootloader == NULL &&
+        def->os.loader) {
+
+        if ((def->os.loader->readonly != VIR_TRISTATE_BOOL_YES) ||
+            (def->os.loader->type != VIR_DOMAIN_LOADER_TYPE_PFLASH)) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("Only read-only pflash is supported."));
+            goto cleanup;
+        }
+
+        if ((bhyveDriverGetCaps(conn) & BHYVE_CAP_LPC_BOOTROM) == 0) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("Installed bhyve binary does not support "
+                          "bootrom"));
+            goto cleanup;
+        }
+    } else {
+        if (!(loadcmd = virBhyveProcessBuildLoadCmd(conn, def, "<device.map>",
                                                 NULL)))
-        goto cleanup;
+            goto cleanup;
+
+        virBufferAdd(&buf, virCommandToString(loadcmd), -1);
+        virBufferAddChar(&buf, '\n');
+    }
 
     if (!(cmd = virBhyveProcessBuildBhyveCmd(conn, def, true)))
         goto cleanup;
 
-    virBufferAdd(&buf, virCommandToString(loadcmd), -1);
-    virBufferAddChar(&buf, '\n');
     virBufferAdd(&buf, virCommandToString(cmd), -1);
 
     if (virBufferCheckError(&buf) < 0)
@@ -1124,6 +1144,13 @@ bhyveDomainSetMetadata(virDomainPtr dom,
                                   privconn->xmlopt, BHYVE_STATE_DIR,
                                   BHYVE_CONFIG_DIR, flags);
 
+    if (ret == 0) {
+        virObjectEventPtr ev = NULL;
+        ev = virDomainEventMetadataChangeNewFromObj(vm, type, uri);
+        virObjectEventStateQueue(privconn->domainEventState, ev);
+    }
+
+
  cleanup:
     virObjectUnref(caps);
     virObjectUnlock(vm);
@@ -1202,6 +1229,7 @@ bhyveStateCleanup(void)
     virSysinfoDefFree(bhyve_driver->hostsysinfo);
     virObjectUnref(bhyve_driver->closeCallbacks);
     virObjectUnref(bhyve_driver->domainEventState);
+    virObjectUnref(bhyve_driver->config);
 
     virMutexDestroy(&bhyve_driver->lock);
     VIR_FREE(bhyve_driver);
@@ -1239,9 +1267,7 @@ bhyveStateInitialize(bool privileged,
     if (virBhyveProbeGrubCaps(&bhyve_driver->grubcaps) < 0)
         goto cleanup;
 
-    if (!(bhyve_driver->xmlopt = virDomainXMLOptionNew(&virBhyveDriverDomainDefParserConfig,
-                                                       &virBhyveDriverPrivateDataCallbacks,
-                                                       NULL)))
+    if (!(bhyve_driver->xmlopt = virBhyveDriverCreateXMLConf(bhyve_driver)))
         goto cleanup;
 
     if (!(bhyve_driver->domains = virDomainObjListNew()))
@@ -1251,6 +1277,12 @@ bhyveStateInitialize(bool privileged,
         goto cleanup;
 
     bhyve_driver->hostsysinfo = virSysinfoRead();
+
+    if (!(bhyve_driver->config = virBhyveDriverConfigNew()))
+        goto cleanup;
+
+    if (virBhyveLoadDriverConfig(bhyve_driver->config, SYSCONFDIR "/libvirt/bhyve.conf") < 0)
+        goto cleanup;
 
     if (virFileMakePath(BHYVE_LOG_DIR) < 0) {
         virReportSystemError(errno,
@@ -1633,7 +1665,8 @@ bhyveConnectGetDomainCapabilities(virConnectPtr conn,
         goto cleanup;
     }
 
-    if (!(caps = virBhyveDomainCapsBuild(emulatorbin, machine, arch, virttype)))
+    if (!(caps = virBhyveDomainCapsBuild(conn->privateData, emulatorbin,
+                                         machine, arch, virttype)))
         goto cleanup;
 
     ret = virDomainCapsFormat(caps);

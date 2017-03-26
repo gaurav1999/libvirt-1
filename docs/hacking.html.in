@@ -8,20 +8,26 @@
 
     <h2><a name="patches">General tips for contributing patches</a></h2>
     <ol>
-      <li>Discuss any large changes on the mailing list first.  Post patches
-        early and listen to feedback.</li>
+      <li>
+        <p>Discuss any large changes on the mailing list first.  Post patches
+        early and listen to feedback.</p>
+      </li>
 
-      <li>Official upstream repository is kept in git
+      <li>
+        <p>Official upstream repository is kept in git
         (<code>git://libvirt.org/libvirt.git</code>) and is browsable
         along with other libvirt-related repositories
-        (e.g. libvirt-python) <a href="http://libvirt.org/git/">online</a>.</li>
+        (e.g. libvirt-python) <a href="http://libvirt.org/git/">online</a>.</p>
+      </li>
 
-      <li>Patches to translations are maintained via
+      <li>
+        <p>Patches to translations are maintained via
         the <a href="https://fedora.zanata.org/">zanata project</a>.
         If you want to fix a translation in a .po file, join the
         appropriate language team. The libvirt release process
         automatically pulls the latest version of each translation
-        file from zanata.</li>
+        file from zanata.</p>
+      </li>
 
       <li><p>Post patches using "git send-email", with git rename
         detection enabled.  You need a one-time setup of:</p>
@@ -98,8 +104,11 @@
         of <code>git bisect</code>, among other things).</p>
       </li>
 
-      <li>Make sure your patches apply against libvirt GIT.  Developers
-        only follow GIT and don't care much about released versions.</li>
+      <li>
+        <p>Make sure your patches apply against libvirt GIT.  Developers
+        only follow GIT and don't care much about released versions.</p>
+      </li>
+
       <li><p>Run the automated tests on your code before submitting any changes.
           In particular, configure with compile warnings set to
           -Werror.  This is done automatically for a git checkout; from a
@@ -280,8 +289,22 @@
 }
 </pre>
       </li>
-      <li>Update tests and/or documentation, particularly if you are adding
-        a new feature or changing the output of a program.</li>
+
+      <li>
+        <p>Update tests and/or documentation, particularly if you are adding
+        a new feature or changing the output of a program.</p>
+      </li>
+
+      <li>
+        <p>Don't forget to update the <a href="news.html">release notes</a>
+        by changing <code>docs/news.xml</code> if your changes are
+        significant. All user-visible changes, such as adding new XML elements
+        or fixing all but the most obscure bugs, must be (briefly) described
+        in a release notes entry; changes that are only relevant to other
+        libvirt developers, such as code refactoring, don't belong in the
+        release notes. Note that <code>docs/news.xml</code> should be updated
+        in its own commit not to get in the way of backports.</p>
+      </li>
     </ol>
 
     <p>
@@ -291,6 +314,99 @@
         Richard Jones' guide to working with open source projects</a>.
     </p>
 
+    <h2><a name="naming">Naming conventions</a></h2>
+
+    <p>
+      When reading libvirt code, a number of different naming conventions will
+      be evident due to various changes in thinking over the course of the
+      project's lifetime. The conventions documented below should be followed
+      when creating any entirely new files in libvirt. When working on existing
+      files, while it is desirable to apply these conventions, keeping a
+      consistent style with existing code in that particular file is generally
+      more important. The overall guiding principal is that every file, enum,
+      struct, function, macro and typedef name must have a 'vir' or 'VIR' prefix.
+      All local scope variable names are exempt, and global variables are exempt,
+      unless exported in a header file.
+    </p>
+
+    <dl>
+      <dt>File names</dt>
+      <dd>
+        <p>
+          File naming varies depending on the subdirectory. The preferred
+          style is to have a 'vir' prefix, followed by a name which matches
+          the name of the functions / objects inside the file. For example,
+          a file containing an object  'virHashtable' is stored in files
+          'virhashtable.c' and 'virhashtable.h'. Sometimes, methods which
+          would otherwise be declared 'static' need to be exported for use
+          by a test suite. For this purpose a second header file should be
+          added with a suffix of 'priv', e.g. 'virhashtablepriv.h'. Use of
+          underscores in file names is discouraged when using the 'vir'
+          prefix style. The 'vir' prefix naming applies to src/util,
+          src/rpc and tests/ directories. Most other directories do not
+          follow this convention.
+        </p>
+      </dd>
+      <dt>Enum type &amp; field names</dt>
+      <dd>
+        <p>
+          All enums should have a 'vir' prefix in their typedef name,
+          and each following word should have its first letter in
+          uppercase. The enum name should match the typedef name with
+          a leading underscore. The enum member names should be in all
+          uppercase, and use an underscore to separate each word. The
+          enum member name prefix should match the enum typedef name.
+        </p>
+        <pre>
+    typedef enum _virSocketType virSocketType;
+    enum _virSocketType {
+        VIR_SOCKET_TYPE_IPV4,
+        VIR_SOCKET_TYPE_IPV6,
+    };</pre>
+      </dd>
+      <dt>Struct type names</dt>
+      <dd>
+        <p>
+          All structs should have a 'vir' prefix in their typedef name,
+          and each following word should have its first letter in
+          uppercase. The struct name should be the same as the typedef
+          name with a leading underscore. A second typedef should be
+          given for a pointer to the struct with a 'Ptr' suffix.
+        </p>
+        <pre>
+    typedef struct _virHashTable virHashTable;
+    typedef virHashTable *virHashTablePtr;
+    struct _virHashTable {
+       ...
+    };</pre>
+      </dd>
+      <dt>Function names</dt>
+      <dd>
+        <p>
+          All functions should have a 'vir' prefix in their name,
+          followed by one or more words with first letter of each
+          word capitalized. Underscores should not be used in function
+          names. If the function is operating on an object, then the
+          function name prefix should match the object typedef name,
+          otherwise it should match the filename. Following this
+          comes the verb / action name, and finally an optional
+          subject name. For example, given an object 'virHashTable',
+          all functions should have a name 'virHashTable$VERB' or
+          'virHashTable$VERB$SUBJECT", e.g. 'virHashTableLookup'
+          or 'virHashTableGetValue'.
+        </p>
+      </dd>
+      <dt>Macro names</dt>
+      <dd>
+        <p>
+          All macros should have a "VIR" prefix in their name, followed
+          by one or more uppercase words separated by underscores. The
+          macro argument names should be in lowercase. Aside from having
+          a "VIR" prefix there are no common practices for the rest of
+          the macro name.
+        </p>
+      </dd>
+    </dl>
 
     <h2><a name="indent">Code indentation</a></h2>
     <p>

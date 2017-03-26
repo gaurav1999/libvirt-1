@@ -61,6 +61,7 @@
 #include "virlog.h"
 #include "virdnsmasq.h"
 #include "configmake.h"
+#include "virnetlink.h"
 #include "virnetdev.h"
 #include "virnetdevip.h"
 #include "virnetdevbridge.h"
@@ -84,6 +85,8 @@
  * Macro providing the upper limit on the size of leases file
  */
 #define VIR_NETWORK_DHCP_LEASE_FILE_SIZE_MAX (32 * 1024 * 1024)
+
+#define SYSCTL_PATH "/proc/sys"
 
 VIR_LOG_INIT("network.bridge_driver");
 
@@ -1065,6 +1068,8 @@ networkDnsmasqConfContents(virNetworkObjPtr network,
      */
 
     /* create dnsmasq config file appropriate for this network */
+
+    /* Don't forget to update networkxml2conftest :-) */
     virBufferAsprintf(&configbuf,
                       "##WARNING:  THIS IS AN AUTO-GENERATED FILE. "
                       "CHANGES TO IT ARE LIKELY TO BE\n"
@@ -1083,7 +1088,15 @@ networkDnsmasqConfContents(virNetworkObjPtr network,
         virBufferAddLit(&configbuf, "port=0\n");
 
     if (wantDNS && network->def->dns.forwarders) {
-        virBufferAddLit(&configbuf, "no-resolv\n");
+        /* addNoResolv should be set to true if there are any entries
+         * that specify an IP address for requests, but no domain
+         * qualifier (implying that all requests otherwise "unclaimed"
+         * should be sent to that address). if it is still false when
+         * we've looked at all entries, it means we still need the
+         * host's resolv.conf for some cases.
+         */
+        bool addNoResolv = false;
+
         for (i = 0; i < network->def->dns.nfwds; i++) {
             virNetworkDNSForwarderPtr fwd = &network->def->dns.forwarders[i];
 
@@ -1097,11 +1110,15 @@ networkDnsmasqConfContents(virNetworkObjPtr network,
                     goto cleanup;
                 virBufferAsprintf(&configbuf, "%s\n", addr);
                 VIR_FREE(addr);
+                if (!fwd->domain)
+                    addNoResolv = true;
             } else {
                 /* "don't forward requests for this domain" */
                 virBufferAddLit(&configbuf, "#\n");
             }
         }
+        if (addNoResolv)
+            virBufferAddLit(&configbuf, "no-resolv\n");
     }
 
     if (network->def->domain) {
@@ -2078,14 +2095,13 @@ networkEnableIPForwarding(bool enableIPv4, bool enableIPv6)
                            &enabled, sizeof(enabled));
 #else
     if (enableIPv4)
-        ret = virFileWriteStr("/proc/sys/net/ipv4/ip_forward", "1\n", 0);
+        ret = virFileWriteStr(SYSCTL_PATH "/net/ipv4/ip_forward", "1\n", 0);
     if (enableIPv6 && ret == 0)
-        ret = virFileWriteStr("/proc/sys/net/ipv6/conf/all/forwarding", "1\n", 0);
+        ret = virFileWriteStr(SYSCTL_PATH "/net/ipv6/conf/all/forwarding", "1\n", 0);
+
 #endif
     return ret;
 }
-
-#define SYSCTL_PATH "/proc/sys"
 
 static int
 networkSetIPv6Sysctls(virNetworkObjPtr network)
@@ -2299,6 +2315,7 @@ networkStartNetworkVirtual(virNetworkDriverStatePtr driver,
         if (virNetDevTapCreateInBridgePort(network->def->bridge,
                                            &macTapIfName, &network->def->mac,
                                            NULL, NULL, &tapfd, 1, NULL, NULL,
+                                           network->def->mtu, NULL,
                                            VIR_NETDEV_TAP_CREATE_USE_MAC_FOR_BRIDGE |
                                            VIR_NETDEV_TAP_CREATE_IFUP |
                                            VIR_NETDEV_TAP_CREATE_PERSIST) < 0) {
@@ -2373,11 +2390,16 @@ networkStartNetworkVirtual(virNetworkDriverStatePtr driver,
     }
 
     /* If forward.type != NONE, turn on global IP forwarding */
-    if (network->def->forward.type != VIR_NETWORK_FORWARD_NONE &&
-        networkEnableIPForwarding(v4present, v6present) < 0) {
-        virReportSystemError(errno, "%s",
-                             _("failed to enable IP forwarding"));
-        goto err3;
+    if (network->def->forward.type != VIR_NETWORK_FORWARD_NONE) {
+        if (!virNetDevIPCheckIPv6Forwarding())
+            goto err3; /* Precise error message already provided */
+
+
+        if (networkEnableIPForwarding(v4present, v6present) < 0) {
+            virReportSystemError(errno, "%s",
+                                 _("failed to enable IP forwarding"));
+            goto err3;
+        }
     }
 
 
@@ -2712,6 +2734,8 @@ networkStartNetwork(virNetworkDriverStatePtr driver,
          * VIR_NETWORK_FORWARD_BRIDGE with no bridge device defined
          * (since that is macvtap bridge mode).
          */
+        ATTRIBUTE_FALLTHROUGH;
+
     case VIR_NETWORK_FORWARD_PRIVATE:
     case VIR_NETWORK_FORWARD_VEPA:
     case VIR_NETWORK_FORWARD_PASSTHROUGH:
@@ -2789,6 +2813,8 @@ networkShutdownNetwork(virNetworkDriverStatePtr driver,
          * VIR_NETWORK_FORWARD_BRIDGE with no bridge device defined
          * (since that is macvtap bridge mode).
          */
+        ATTRIBUTE_FALLTHROUGH;
+
     case VIR_NETWORK_FORWARD_PRIVATE:
     case VIR_NETWORK_FORWARD_VEPA:
     case VIR_NETWORK_FORWARD_PASSTHROUGH:
@@ -4971,6 +4997,8 @@ networkGetNetworkAddress(const char *netname, char **netaddr)
          * fall through if netdef->bridge wasn't set, since that is
          * macvtap bridge mode network.
          */
+        ATTRIBUTE_FALLTHROUGH;
+
     case VIR_NETWORK_FORWARD_PRIVATE:
     case VIR_NETWORK_FORWARD_VEPA:
     case VIR_NETWORK_FORWARD_PASSTHROUGH:

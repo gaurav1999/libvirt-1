@@ -25,8 +25,11 @@
 # include "capabilities.h"
 # include "conf/domain_capabilities.h"
 
+# include "bhyve_utils.h"
+
 virCapsPtr virBhyveCapsBuild(void);
-virDomainCapsPtr virBhyveDomainCapsBuild(const char *emulatorbin,
+virDomainCapsPtr virBhyveDomainCapsBuild(bhyveConnPtr,
+                                         const char *emulatorbin,
                                          const char *machine,
                                          virArch arch,
                                          virDomainVirtType virttype);
@@ -37,7 +40,11 @@ typedef enum {
 } virBhyveGrubCapsFlags;
 
 typedef enum {
-    BHYVE_CAP_RTC_UTC = 1,
+    BHYVE_CAP_RTC_UTC = 1 << 0,
+    BHYVE_CAP_AHCI32SLOT = 1 << 1,
+    BHYVE_CAP_NET_E1000 = 1 << 2,
+    BHYVE_CAP_LPC_BOOTROM = 1 << 3,
+    BHYVE_CAP_FBUF = 1 << 4,
 } virBhyveCapsFlags;
 
 int virBhyveProbeGrubCaps(virBhyveGrubCapsFlags *caps);

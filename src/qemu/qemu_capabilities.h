@@ -119,7 +119,7 @@ typedef enum {
     /* 50 */
     QEMU_CAPS_HDA_DUPLEX, /* -device hda-duplex */
     QEMU_CAPS_DRIVE_AIO, /* -drive aio= supported */
-    QEMU_CAPS_PCI_MULTIBUS, /* bus=pci.0 vs bus=pci */
+    X_QEMU_CAPS_PCI_MULTIBUS, /* bus=pci.0 vs bus=pci */
     QEMU_CAPS_PCI_BOOTINDEX, /* pci-assign.bootindex */
     QEMU_CAPS_CCID_EMULATED, /* -device ccid-card-emulated */
 
@@ -390,6 +390,16 @@ typedef enum {
     QEMU_CAPS_DEVICE_VHOST_SCSI, /* -device vhost-scsi-{ccw,pci} */
     QEMU_CAPS_DRIVE_IOTUNE_GROUP, /* -drive throttling.group=<name> */
 
+    /* 245 */
+    QEMU_CAPS_QUERY_CPU_MODEL_EXPANSION, /* qmp query-cpu-model-expansion */
+    QEMU_CAPS_VIRTIO_NET_HOST_MTU, /* virtio-net-*.host_mtu */
+    QEMU_CAPS_SPICE_RENDERNODE, /* -spice rendernode */
+    QEMU_CAPS_DEVICE_NVDIMM, /* -device nvdimm */
+    QEMU_CAPS_DEVICE_PCIE_ROOT_PORT, /* -device pcie-root-port */
+
+    /* 250 */
+    QEMU_CAPS_QUERY_CPU_DEFINITIONS, /* qmp query-cpu-definitions */
+
     QEMU_CAPS_LAST /* this must always be the last item */
 } virQEMUCapsFlags;
 
@@ -437,7 +447,8 @@ int virQEMUCapsGetCPUDefinitions(virQEMUCapsPtr qemuCaps,
                                  virDomainVirtType type,
                                  char ***names,
                                  size_t *count);
-virCPUDefPtr virQEMUCapsGetHostModel(virQEMUCapsPtr qemuCaps);
+virCPUDefPtr virQEMUCapsGetHostModel(virQEMUCapsPtr qemuCaps,
+                                     virDomainVirtType type);
 bool virQEMUCapsIsCPUModeSupported(virQEMUCapsPtr qemuCaps,
                                    virCapsPtr caps,
                                    virDomainVirtType type,

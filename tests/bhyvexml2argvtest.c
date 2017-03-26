@@ -7,6 +7,7 @@
 # include "datatypes.h"
 
 # include "bhyve/bhyve_capabilities.h"
+# include "bhyve/bhyve_domain.h"
 # include "bhyve/bhyve_utils.h"
 # include "bhyve/bhyve_command.h"
 
@@ -36,16 +37,26 @@ static int testCompareXMLToArgvFiles(const char *xml,
 
     if (!(vmdef = virDomainDefParseFile(xml, driver.caps, driver.xmlopt,
                                         NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE))) {
-        if (flags & FLAG_EXPECT_PARSE_ERROR)
+        if (flags & FLAG_EXPECT_PARSE_ERROR) {
             ret = 0;
+        } else if (flags & FLAG_EXPECT_FAILURE) {
+            ret = 0;
+            VIR_TEST_DEBUG("Got expected error: %s\n",
+                    virGetLastErrorMessage());
+            virResetLastError();
+        }
+
         goto out;
     }
 
     conn->privateData = &driver;
 
     cmd = virBhyveProcessBuildBhyveCmd(conn, vmdef, false);
-    ldcmd = virBhyveProcessBuildLoadCmd(conn, vmdef, "<device.map>",
-                                        &actualdm);
+    if (vmdef->os.loader)
+        ldcmd = virCommandNew("dummy");
+    else
+        ldcmd = virBhyveProcessBuildLoadCmd(conn, vmdef, "<device.map>",
+                                            &actualdm);
 
     if ((cmd == NULL) || (ldcmd == NULL)) {
         if (flags & FLAG_EXPECT_FAILURE) {
@@ -131,7 +142,7 @@ mymain(void)
     if ((driver.caps = virBhyveCapsBuild()) == NULL)
         return EXIT_FAILURE;
 
-    if ((driver.xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL)) == NULL)
+    if ((driver.xmlopt = virBhyveDriverCreateXMLConf(&driver)) == NULL)
         return EXIT_FAILURE;
 
 # define DO_TEST_FULL(name, flags)                             \
@@ -154,7 +165,9 @@ mymain(void)
     DO_TEST_FULL(name, FLAG_EXPECT_PARSE_ERROR)
 
     driver.grubcaps = BHYVE_GRUB_CAP_CONSDEV;
-    driver.bhyvecaps = BHYVE_CAP_RTC_UTC;
+    driver.bhyvecaps = BHYVE_CAP_RTC_UTC | BHYVE_CAP_AHCI32SLOT | \
+                       BHYVE_CAP_NET_E1000 | BHYVE_CAP_LPC_BOOTROM | \
+                       BHYVE_CAP_FBUF;
 
     DO_TEST("base");
     DO_TEST("acpiapic");
@@ -177,10 +190,36 @@ mymain(void)
     DO_TEST("disk-cdrom-grub");
     DO_TEST("serial-grub");
     DO_TEST("localtime");
+    DO_TEST("net-e1000");
+    DO_TEST("uefi");
+    DO_TEST("vnc");
+
+    /* Address allocation tests */
+    DO_TEST("addr-single-sata-disk");
+    DO_TEST("addr-multiple-sata-disks");
+    DO_TEST("addr-more-than-32-sata-disks");
+    DO_TEST("addr-single-virtio-disk");
+    DO_TEST("addr-multiple-virtio-disks");
+
+    /* The same without 32 devs per controller support */
+    driver.bhyvecaps ^= BHYVE_CAP_AHCI32SLOT;
+    DO_TEST("addr-no32devs-single-sata-disk");
+    DO_TEST("addr-no32devs-multiple-sata-disks");
+    DO_TEST_FAILURE("addr-no32devs-more-than-32-sata-disks");
 
     driver.grubcaps = 0;
 
     DO_TEST("serial-grub-nocons");
+
+    driver.bhyvecaps &= ~BHYVE_CAP_NET_E1000;
+
+    DO_TEST_FAILURE("net-e1000");
+
+    driver.bhyvecaps &= ~BHYVE_CAP_LPC_BOOTROM;
+    DO_TEST_FAILURE("uefi");
+
+    driver.bhyvecaps &= ~BHYVE_CAP_FBUF;
+    DO_TEST_FAILURE("vnc");
 
     virObjectUnref(driver.caps);
     virObjectUnref(driver.xmlopt);

@@ -2188,6 +2188,98 @@ void virDomainStatsRecordListFree(virDomainStatsRecordPtr *stats);
  */
 # define VIR_PERF_PARAM_REF_CPU_CYCLES "ref_cpu_cycles"
 
+/**
+ * VIR_PERF_PARAM_CPU_CLOCK:
+ *
+ * Macro for typed parameter name that represents cpu_clock
+ * perf event which can be used to measure the count of cpu
+ * clock time by applications running on the platform. It
+ * corresponds to the "perf.cpu_clock" field in the *Stats
+ * APIs.
+ */
+# define VIR_PERF_PARAM_CPU_CLOCK "cpu_clock"
+
+/**
+ * VIR_PERF_PARAM_TASK_CLOCK:
+ *
+ * Macro for typed parameter name that represents task_clock
+ * perf event which can be used to measure the count of task
+ * clock time by applications running on the platform. It
+ * corresponds to the "perf.task_clock" field in the *Stats
+ * APIs.
+ */
+# define VIR_PERF_PARAM_TASK_CLOCK "task_clock"
+
+/**
+* VIR_PERF_PARAM_PAGE_FAULTS:
+*
+* Macro for typed parameter name that represents page_faults
+* perf event which can be used to measure the count of page
+* faults by applications running on the platform. It corresponds
+* to the "perf.page_faults" field in the *Stats APIs.
+*/
+# define VIR_PERF_PARAM_PAGE_FAULTS "page_faults"
+
+/**
+ * VIR_PERF_PARAM_CONTEXT_SWITCHES:
+ *
+ * Macro for typed parameter name that represents context_switches
+ * perf event which can be used to measure the count of context
+ * switches by applications running on the platform. It corresponds
+ * to the "perf.context_switches" field in the *Stats APIs.
+ */
+# define VIR_PERF_PARAM_CONTEXT_SWITCHES "context_switches"
+
+/**
+ * VIR_PERF_PARAM_CPU_MIGRATIONS:
+ *
+ * Macro for typed parameter name that represents cpu_migrations
+ * perf event which can be used to measure the count of cpu
+ * migrations by applications running on the platform. It corresponds
+ * to the "perf.cpu_migrations" field in the *Stats APIs.
+ */
+# define VIR_PERF_PARAM_CPU_MIGRATIONS "cpu_migrations"
+
+/**
+ * VIR_PERF_PARAM_PAGE_FAULTS_MIN:
+ *
+ * Macro for typed parameter name that represents page_faults_min
+ * perf event which can be used to measure the count of minor page
+ * faults by applications running on the platform. It corresponds
+ * to the "perf.page_faults_min" field in the *Stats APIs.
+ */
+# define VIR_PERF_PARAM_PAGE_FAULTS_MIN  "page_faults_min"
+
+/**
+ * VIR_PERF_PARAM_PAGE_FAULTS_MAJ:
+ *
+ * Macro for typed parameter name that represents page_faults_maj
+ * perf event which can be used to measure the count of major page
+ * faults by applications running on the platform. It corresponds
+ * to the "perf.page_faults_maj" field in the *Stats APIs.
+ */
+# define VIR_PERF_PARAM_PAGE_FAULTS_MAJ  "page_faults_maj"
+
+/**
+ * VIR_PERF_PARAM_ALIGNMENT_FAULTS:
+ *
+ * Macro for typed parameter name that represents alignment_faults
+ * perf event which can be used to measure the count of alignment
+ * faults by applications running on the platform. It corresponds
+ * to the "perf.alignment_faults" field in the *Stats APIs.
+ */
+# define VIR_PERF_PARAM_ALIGNMENT_FAULTS  "alignment_faults"
+
+/**
+ * VIR_PERF_PARAM_EMULATION_FAULTS:
+ *
+ * Macro for typed parameter name that represents emulation_faults
+ * perf event which can be used to measure the count of emulation
+ * faults by applications running on the platform. It corresponds
+ * to the "perf.emulation_faults" field in the *Stats APIs.
+ */
+# define VIR_PERF_PARAM_EMULATION_FAULTS  "emulation_faults"
+
 int virDomainGetPerfEvents(virDomainPtr dom,
                            virTypedParameterPtr *params,
                            int *nparams,
@@ -3770,6 +3862,25 @@ typedef void (*virConnectDomainEventDeviceRemovalFailedCallback)(virConnectPtr c
                                                                  const char *devAlias,
                                                                  void *opaque);
 
+/**
+ * virConnectDomainEventMetadataChangeCallback:
+ * @conn: connection object
+ * @dom: domain on which the event occurred
+ * @type: a value from virDomainMetadataTypea
+ * @nsuri: XML namespace URI
+ * @opaque: application specified data
+ *
+ * This callback is triggered when the domain XML metadata is changed
+ *
+ * The callback signature to use when registering for an event of type
+ * VIR_DOMAIN_EVENT_ID_METADATA_CHANGE with virConnectDomainEventRegisterAny().
+ */
+typedef void (*virConnectDomainEventMetadataChangeCallback)(virConnectPtr conn,
+                                                            virDomainPtr dom,
+                                                            int type,
+                                                            const char *nsuri,
+                                                            void *opaque);
+
 
 /**
  * virConnectDomainEventMigrationIterationCallback:
@@ -4195,6 +4306,7 @@ typedef enum {
     VIR_DOMAIN_EVENT_ID_MIGRATION_ITERATION = 20, /* virConnectDomainEventMigrationIterationCallback */
     VIR_DOMAIN_EVENT_ID_JOB_COMPLETED = 21,  /* virConnectDomainEventJobCompletedCallback */
     VIR_DOMAIN_EVENT_ID_DEVICE_REMOVAL_FAILED = 22, /* virConnectDomainEventDeviceRemovalFailedCallback */
+    VIR_DOMAIN_EVENT_ID_METADATA_CHANGE = 23, /* virConnectDomainEventMetadataChangeCallback */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_EVENT_ID_LAST
@@ -4507,5 +4619,10 @@ int virDomainSetGuestVcpus(virDomainPtr domain,
                            const char *cpumap,
                            int state,
                            unsigned int flags);
+
+int virDomainSetVcpu(virDomainPtr domain,
+                     const char *vcpumap,
+                     int state,
+                     unsigned int flags);
 
 #endif /* __VIR_LIBVIRT_DOMAIN_H__ */

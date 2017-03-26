@@ -60,7 +60,8 @@ int qemuMonitorJSONSystemReset(qemuMonitorPtr mon);
 
 int qemuMonitorJSONQueryCPUs(qemuMonitorPtr mon,
                              struct qemuMonitorQueryCpusEntry **entries,
-                             size_t *nentries);
+                             size_t *nentries,
+                             bool force);
 int qemuMonitorJSONGetVirtType(qemuMonitorPtr mon,
                                virDomainVirtType *virtType);
 int qemuMonitorJSONUpdateVideoMemorySize(qemuMonitorPtr mon,
@@ -352,6 +353,12 @@ int qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
                                      qemuMonitorCPUDefInfoPtr **cpus)
     ATTRIBUTE_NONNULL(2);
 
+int qemuMonitorJSONGetCPUModelExpansion(qemuMonitorPtr mon,
+                                        qemuMonitorCPUModelExpansionType type,
+                                        const char *model_name,
+                                        qemuMonitorCPUModelInfoPtr *model_info)
+    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
+
 int qemuMonitorJSONGetCommands(qemuMonitorPtr mon,
                                char ***commands)
     ATTRIBUTE_NONNULL(2);
@@ -468,7 +475,8 @@ int qemuMonitorJSONGetCPUx86Data(qemuMonitorPtr mon,
 
 int qemuMonitorJSONGetGuestCPU(qemuMonitorPtr mon,
                                virArch arch,
-                               virCPUDataPtr *data);
+                               virCPUDataPtr *data,
+                               virCPUDataPtr *disabled);
 
 int qemuMonitorJSONRTCResetReinjection(qemuMonitorPtr mon);
 

@@ -327,11 +327,13 @@ qemuMonitorDispose(void *obj)
 
 
 static int
-qemuMonitorOpenUnix(const char *monitor, pid_t cpid)
+qemuMonitorOpenUnix(const char *monitor,
+                    pid_t cpid,
+                    unsigned long long timeout)
 {
     struct sockaddr_un addr;
     int monfd;
-    virTimeBackOffVar timeout;
+    virTimeBackOffVar timebackoff;
     int ret = -1;
 
     if ((monfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
@@ -348,9 +350,9 @@ qemuMonitorOpenUnix(const char *monitor, pid_t cpid)
         goto error;
     }
 
-    if (virTimeBackOffStart(&timeout, 1, 30*1000 /* ms */) < 0)
+    if (virTimeBackOffStart(&timebackoff, 1, timeout * 1000) < 0)
         goto error;
-    while (virTimeBackOffWait(&timeout)) {
+    while (virTimeBackOffWait(&timebackoff)) {
         ret = connect(monfd, (struct sockaddr *) &addr, sizeof(addr));
 
         if (ret == 0)
@@ -871,10 +873,30 @@ qemuMonitorOpenInternal(virDomainObjPtr vm,
 }
 
 
+#define QEMU_DEFAULT_MONITOR_WAIT 30
+
+/**
+ * qemuMonitorOpen:
+ * @vm: domain object
+ * @config: monitor configuration
+ * @json: enable JSON on the monitor
+ * @timeout: number of seconds to add to default timeout
+ * @cb: monitor event handles
+ * @opaque: opaque data for @cb
+ *
+ * Opens the monitor for running qemu. It may happen that it
+ * takes some time for qemu to create the monitor socket (e.g.
+ * because kernel is zeroing configured hugepages), therefore we
+ * wait up to default + timeout seconds for the monitor to show
+ * up after which a failure is claimed.
+ *
+ * Returns monitor object, NULL on error.
+ */
 qemuMonitorPtr
 qemuMonitorOpen(virDomainObjPtr vm,
                 virDomainChrSourceDefPtr config,
                 bool json,
+                unsigned long long timeout,
                 qemuMonitorCallbacksPtr cb,
                 void *opaque)
 {
@@ -882,10 +904,14 @@ qemuMonitorOpen(virDomainObjPtr vm,
     bool hasSendFD = false;
     qemuMonitorPtr ret;
 
+    timeout += QEMU_DEFAULT_MONITOR_WAIT;
+
     switch (config->type) {
     case VIR_DOMAIN_CHR_TYPE_UNIX:
         hasSendFD = true;
-        if ((fd = qemuMonitorOpenUnix(config->data.nix.path, vm ? vm->pid : 0)) < 0)
+        if ((fd = qemuMonitorOpenUnix(config->data.nix.path,
+                                      vm ? vm->pid : 0,
+                                      timeout)) < 0)
             return NULL;
         break;
 
@@ -953,7 +979,7 @@ qemuMonitorClose(qemuMonitorPtr mon)
             virErrorPtr err = virSaveLastError();
 
             virReportError(VIR_ERR_OPERATION_FAILED, "%s",
-                           _("Qemu monitor was closed"));
+                           _("QEMU monitor was closed"));
             virCopyLastError(&mon->lastError);
             if (err) {
                 virSetError(err);
@@ -1921,12 +1947,12 @@ qemuMonitorGetCPUInfo(qemuMonitorPtr mon,
         goto cleanup;
 
     if (mon->json)
-        rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries);
+        rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries, hotplug);
     else
         rc = qemuMonitorTextQueryCPUs(mon, &cpuentries, &ncpuentries);
 
     if (rc < 0) {
-        if (rc == -2) {
+        if (!hotplug && rc == -2) {
             VIR_STEAL_PTR(*vcpus, info);
             ret = 0;
         }
@@ -1974,7 +2000,7 @@ qemuMonitorGetCpuHalted(qemuMonitorPtr mon,
     QEMU_CHECK_MONITOR_NULL(mon);
 
     if (mon->json)
-        rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries);
+        rc = qemuMonitorJSONQueryCPUs(mon, &cpuentries, &ncpuentries, false);
     else
         rc = qemuMonitorTextQueryCPUs(mon, &cpuentries, &ncpuentries);
 
@@ -2577,8 +2603,12 @@ qemuMonitorMigrateToHost(qemuMonitorPtr mon,
 
     QEMU_CHECK_MONITOR(mon);
 
-    if (virAsprintf(&uri, "%s:%s:%d", protocol, hostname, port) < 0)
+    if (strchr(hostname, ':')) {
+        if (virAsprintf(&uri, "%s:[%s]:%d", protocol, hostname, port) < 0)
+            return -1;
+    } else if (virAsprintf(&uri, "%s:%s:%d", protocol, hostname, port) < 0) {
         return -1;
+    }
 
     if (mon->json)
         ret = qemuMonitorJSONMigrate(mon, flags, uri);
@@ -3489,7 +3519,7 @@ qemuMonitorVMStatusToPausedReason(const char *status)
         return VIR_DOMAIN_PAUSED_UNKNOWN;
 
     if ((st = qemuMonitorVMStatusTypeFromString(status)) < 0) {
-        VIR_WARN("Qemu reported unknown VM status: '%s'", status);
+        VIR_WARN("QEMU reported unknown VM status: '%s'", status);
         return VIR_DOMAIN_PAUSED_UNKNOWN;
     }
 
@@ -3512,7 +3542,7 @@ qemuMonitorVMStatusToPausedReason(const char *status)
         return VIR_DOMAIN_PAUSED_USER;
 
     case QEMU_MONITOR_VM_STATUS_RUNNING:
-        VIR_WARN("Qemu reports the guest is paused but status is 'running'");
+        VIR_WARN("QEMU reports the guest is paused but status is 'running'");
         return VIR_DOMAIN_PAUSED_UNKNOWN;
 
     case QEMU_MONITOR_VM_STATUS_SAVE_VM:
@@ -3632,6 +3662,90 @@ qemuMonitorCPUDefInfoFree(qemuMonitorCPUDefInfoPtr cpu)
         return;
     VIR_FREE(cpu->name);
     VIR_FREE(cpu);
+}
+
+
+int
+qemuMonitorGetCPUModelExpansion(qemuMonitorPtr mon,
+                                qemuMonitorCPUModelExpansionType type,
+                                const char *model_name,
+                                qemuMonitorCPUModelInfoPtr *model_info)
+{
+    VIR_DEBUG("type=%d model_name=%s", type, model_name);
+
+    QEMU_CHECK_MONITOR_JSON(mon);
+
+    return qemuMonitorJSONGetCPUModelExpansion(mon, type, model_name, model_info);
+}
+
+
+void
+qemuMonitorCPUModelInfoFree(qemuMonitorCPUModelInfoPtr model_info)
+{
+    size_t i;
+
+    if (!model_info)
+        return;
+
+    for (i = 0; i < model_info->nprops; i++) {
+        VIR_FREE(model_info->props[i].name);
+        if (model_info->props[i].type == QEMU_MONITOR_CPU_PROPERTY_STRING)
+            VIR_FREE(model_info->props[i].value.string);
+    }
+
+    VIR_FREE(model_info->props);
+    VIR_FREE(model_info->name);
+    VIR_FREE(model_info);
+}
+
+
+qemuMonitorCPUModelInfoPtr
+qemuMonitorCPUModelInfoCopy(const qemuMonitorCPUModelInfo *orig)
+{
+    qemuMonitorCPUModelInfoPtr copy;
+    size_t i;
+
+    if (VIR_ALLOC(copy) < 0)
+        goto error;
+
+    if (VIR_ALLOC_N(copy->props, orig->nprops) < 0)
+        goto error;
+
+    if (VIR_STRDUP(copy->name, orig->name) < 0)
+        goto error;
+
+    copy->nprops = orig->nprops;
+
+    for (i = 0; i < orig->nprops; i++) {
+        if (VIR_STRDUP(copy->props[i].name, orig->props[i].name) < 0)
+            goto error;
+
+        copy->props[i].type = orig->props[i].type;
+        switch (orig->props[i].type) {
+        case QEMU_MONITOR_CPU_PROPERTY_BOOLEAN:
+            copy->props[i].value.boolean = orig->props[i].value.boolean;
+            break;
+
+        case QEMU_MONITOR_CPU_PROPERTY_STRING:
+            if (VIR_STRDUP(copy->props[i].value.string,
+                           orig->props[i].value.string) < 0)
+                goto error;
+            break;
+
+        case QEMU_MONITOR_CPU_PROPERTY_NUMBER:
+            copy->props[i].value.number = orig->props[i].value.number;
+            break;
+
+        case QEMU_MONITOR_CPU_PROPERTY_LAST:
+            break;
+        }
+    }
+
+    return copy;
+
+ error:
+    qemuMonitorCPUModelInfoFree(copy);
+    return NULL;
 }
 
 
@@ -3912,6 +4026,7 @@ qemuMonitorSetDomainLog(qemuMonitorPtr mon,
  * @mon: Pointer to the monitor
  * @arch: arch of the guest
  * @data: returns the cpu data
+ * @disabled: returns the CPU data for features which were disabled by QEMU
  *
  * Retrieve the definition of the guest CPU from a running qemu instance.
  *
@@ -3921,15 +4036,19 @@ qemuMonitorSetDomainLog(qemuMonitorPtr mon,
 int
 qemuMonitorGetGuestCPU(qemuMonitorPtr mon,
                        virArch arch,
-                       virCPUDataPtr *data)
+                       virCPUDataPtr *data,
+                       virCPUDataPtr *disabled)
 {
-    VIR_DEBUG("arch='%s' data='%p'", virArchToString(arch), data);
+    VIR_DEBUG("arch=%s data=%p disabled=%p",
+              virArchToString(arch), data, disabled);
 
     QEMU_CHECK_MONITOR_JSON(mon);
 
     *data = NULL;
+    if (disabled)
+        *disabled = NULL;
 
-    return qemuMonitorJSONGetGuestCPU(mon, arch, data);
+    return qemuMonitorJSONGetGuestCPU(mon, arch, data, disabled);
 }
 
 

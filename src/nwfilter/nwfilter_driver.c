@@ -37,7 +37,6 @@
 #include "viralloc.h"
 #include "domain_conf.h"
 #include "domain_nwfilter.h"
-#include "nwfilter_conf.h"
 #include "nwfilter_driver.h"
 #include "nwfilter_gentech_driver.h"
 #include "configmake.h"
@@ -238,8 +237,7 @@ nwfilterStateInitialize(bool privileged,
 
     VIR_FREE(base);
 
-    if (virNWFilterLoadAllConfigs(&driver->nwfilters,
-                                  driver->configDir) < 0)
+    if (virNWFilterObjLoadAllConfigs(&driver->nwfilters, driver->configDir) < 0)
         goto error;
 
     nwfilterDriverUnlock();
@@ -291,8 +289,7 @@ nwfilterStateReload(void)
     virNWFilterWriteLockFilterUpdates();
     virNWFilterCallbackDriversLock();
 
-    virNWFilterLoadAllConfigs(&driver->nwfilters,
-                              driver->configDir);
+    virNWFilterObjLoadAllConfigs(&driver->nwfilters, driver->configDir);
 
     virNWFilterCallbackDriversUnlock();
     virNWFilterUnlockFilterUpdates();
@@ -555,7 +552,7 @@ nwfilterDefineXML(virConnectPtr conn,
     if (!(nwfilter = virNWFilterObjAssignDef(&driver->nwfilters, def)))
         goto cleanup;
 
-    if (virNWFilterObjSaveDef(driver, def) < 0) {
+    if (virNWFilterSaveDef(driver->configDir, def) < 0) {
         virNWFilterObjRemove(&driver->nwfilters, nwfilter);
         def = NULL;
         goto cleanup;
@@ -596,14 +593,14 @@ nwfilterUndefine(virNWFilterPtr obj)
     if (virNWFilterUndefineEnsureACL(obj->conn, nwfilter->def) < 0)
         goto cleanup;
 
-    if (virNWFilterTestUnassignDef(nwfilter) < 0) {
+    if (virNWFilterObjTestUnassignDef(nwfilter) < 0) {
         virReportError(VIR_ERR_OPERATION_INVALID,
                        "%s",
                        _("nwfilter is in use"));
         goto cleanup;
     }
 
-    if (virNWFilterObjDeleteDef(driver->configDir, nwfilter) < 0)
+    if (virNWFilterDeleteDef(driver->configDir, nwfilter->def) < 0)
         goto cleanup;
 
     virNWFilterObjRemove(&driver->nwfilters, nwfilter);

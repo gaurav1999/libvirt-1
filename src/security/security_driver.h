@@ -51,6 +51,11 @@ typedef const char *(*virSecurityDriverGetBaseLabel) (virSecurityManagerPtr mgr,
 
 typedef int (*virSecurityDriverPreFork) (virSecurityManagerPtr mgr);
 
+typedef int (*virSecurityDriverTransactionStart) (virSecurityManagerPtr mgr);
+typedef int (*virSecurityDriverTransactionCommit) (virSecurityManagerPtr mgr,
+                                                   pid_t pid);
+typedef void (*virSecurityDriverTransactionAbort) (virSecurityManagerPtr mgr);
+
 typedef int (*virSecurityDomainRestoreDiskLabel) (virSecurityManagerPtr mgr,
                                                   virDomainDefPtr def,
                                                   virDomainDiskDefPtr disk);
@@ -118,6 +123,12 @@ typedef int (*virSecurityDomainSetImageLabel) (virSecurityManagerPtr mgr,
 typedef int (*virSecurityDomainRestoreImageLabel) (virSecurityManagerPtr mgr,
                                                    virDomainDefPtr def,
                                                    virStorageSourcePtr src);
+typedef int (*virSecurityDomainSetMemoryLabel) (virSecurityManagerPtr mgr,
+                                                virDomainDefPtr def,
+                                                virDomainMemoryDefPtr mem);
+typedef int (*virSecurityDomainRestoreMemoryLabel) (virSecurityManagerPtr mgr,
+                                                    virDomainDefPtr def,
+                                                    virDomainMemoryDefPtr mem);
 typedef int (*virSecurityDomainSetPathLabel) (virSecurityManagerPtr mgr,
                                               virDomainDefPtr def,
                                               const char *path);
@@ -135,6 +146,10 @@ struct _virSecurityDriver {
 
     virSecurityDriverPreFork preFork;
 
+    virSecurityDriverTransactionStart transactionStart;
+    virSecurityDriverTransactionCommit transactionCommit;
+    virSecurityDriverTransactionAbort transactionAbort;
+
     virSecurityDomainSecurityVerify domainSecurityVerify;
 
     virSecurityDomainSetDiskLabel domainSetSecurityDiskLabel;
@@ -142,6 +157,9 @@ struct _virSecurityDriver {
 
     virSecurityDomainSetImageLabel domainSetSecurityImageLabel;
     virSecurityDomainRestoreImageLabel domainRestoreSecurityImageLabel;
+
+    virSecurityDomainSetMemoryLabel domainSetSecurityMemoryLabel;
+    virSecurityDomainRestoreMemoryLabel domainRestoreSecurityMemoryLabel;
 
     virSecurityDomainSetDaemonSocketLabel domainSetSecurityDaemonSocketLabel;
     virSecurityDomainSetSocketLabel domainSetSecuritySocketLabel;

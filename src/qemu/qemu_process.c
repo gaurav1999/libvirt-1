@@ -221,8 +221,7 @@ qemuConnectAgent(virQEMUDriverPtr driver, virDomainObjPtr vm)
         return 0;
     }
 
-    if (virSecurityManagerSetDaemonSocketLabel(driver->securityManager,
-                                               vm->def) < 0) {
+    if (qemuSecuritySetDaemonSocketLabel(driver->securityManager, vm->def) < 0) {
         VIR_ERROR(_("Failed to set security context for agent for %s"),
                   vm->def->name);
         goto cleanup;
@@ -250,8 +249,7 @@ qemuConnectAgent(virQEMUDriverPtr driver, virDomainObjPtr vm)
         return -1;
     }
 
-    if (virSecurityManagerClearSocketLabel(driver->securityManager,
-                                           vm->def) < 0) {
+    if (qemuSecurityClearSocketLabel(driver->securityManager, vm->def) < 0) {
         VIR_ERROR(_("Failed to clear security context for agent for %s"),
                   vm->def->name);
         qemuAgentClose(agent);
@@ -315,6 +313,10 @@ qemuProcessHandleMonitorEOF(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
      * thread is waiting for a job.
      */
     qemuMonitorUnregister(mon);
+
+    /* We don't want any cleanup from EOF handler (or any other
+     * thread) to enter qemu namespace. */
+    qemuDomainDestroyNamespace(driver, vm);
 
  cleanup:
     virObjectUnlock(vm);
@@ -1656,13 +1658,19 @@ qemuConnectMonitor(virQEMUDriverPtr driver, virDomainObjPtr vm, int asyncJob,
     qemuDomainObjPrivatePtr priv = vm->privateData;
     int ret = -1;
     qemuMonitorPtr mon = NULL;
+    unsigned long long timeout = 0;
 
-    if (virSecurityManagerSetDaemonSocketLabel(driver->securityManager,
-                                               vm->def) < 0) {
+    if (qemuSecuritySetDaemonSocketLabel(driver->securityManager, vm->def) < 0) {
         VIR_ERROR(_("Failed to set security context for monitor for %s"),
                   vm->def->name);
         return -1;
     }
+
+    /* When using hugepages, kernel zeroes them out before
+     * handing them over to qemu. This can be very time
+     * consuming. Therefore, add a second to timeout for each
+     * 1GiB of guest RAM. */
+    timeout = vm->def->mem.total_memory / (1024 * 1024);
 
     /* Hold an extra reference because we can't allow 'vm' to be
      * deleted until the monitor gets its own reference. */
@@ -1674,6 +1682,7 @@ qemuConnectMonitor(virQEMUDriverPtr driver, virDomainObjPtr vm, int asyncJob,
     mon = qemuMonitorOpen(vm,
                           priv->monConfig,
                           priv->monJSON,
+                          timeout,
                           &monitorCallbacks,
                           driver);
 
@@ -1695,7 +1704,7 @@ qemuConnectMonitor(virQEMUDriverPtr driver, virDomainObjPtr vm, int asyncJob,
     }
     priv->mon = mon;
 
-    if (virSecurityManagerClearSocketLabel(driver->securityManager, vm->def) < 0) {
+    if (qemuSecurityClearSocketLabel(driver->securityManager, vm->def) < 0) {
         VIR_ERROR(_("Failed to clear security context for monitor for %s"),
                   vm->def->name);
         return -1;
@@ -2102,30 +2111,8 @@ qemuProcessDetectIOThreadPIDs(virQEMUDriverPtr driver,
     size_t i;
 
     if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_OBJECT_IOTHREAD)) {
-        /* The following check is because at one time a domain could
-         * define iothreadids and start the domain - only failing the
-         * capability check when attempting to add a disk. Because the
-         * iothreads and [n]iothreadids were left untouched other code
-         * assumed it could use the ->thread_id value to make thread_id
-         * based adjustments (e.g. pinning, scheduling) which while
-         * succeeding would execute on the calling thread.
-         */
-        if (vm->def->niothreadids) {
-            for (i = 0; i < vm->def->niothreadids; i++) {
-                /* Check if the domain had defined any iothreadid elements
-                 * and supply a VIR_INFO indicating that it's being removed.
-                 */
-                if (!vm->def->iothreadids[i]->autofill)
-                    VIR_INFO("IOThreads not supported, remove iothread id '%u'",
-                             vm->def->iothreadids[i]->iothread_id);
-                virDomainIOThreadIDDefFree(vm->def->iothreadids[i]);
-            }
-            /* Remove any trace */
-            VIR_FREE(vm->def->iothreadids);
-            vm->def->niothreadids = 0;
-            vm->def->iothreads = 0;
-        }
-        return 0;
+        ret = 0;
+        goto cleanup;
     }
 
     /* Get the list of IOThreads from qemu */
@@ -2638,7 +2625,7 @@ static int qemuProcessHook(void *data)
      * protected across fork()
      */
 
-    virSecurityManagerPostFork(h->driver->securityManager);
+    qemuSecurityPostFork(h->driver->securityManager);
 
     /* Some later calls want pid present */
     h->vm->pid = getpid();
@@ -2651,7 +2638,7 @@ static int qemuProcessHook(void *data)
      * sockets the lock driver opens that we don't want
      * labelled. So far we're ok though.
      */
-    if (virSecurityManagerSetSocketLabel(h->driver->securityManager, h->vm->def) < 0)
+    if (qemuSecuritySetSocketLabel(h->driver->securityManager, h->vm->def) < 0)
         goto cleanup;
     if (virDomainLockProcessStart(h->driver->lockManager,
                                   h->cfg->uri,
@@ -2660,13 +2647,10 @@ static int qemuProcessHook(void *data)
                                   true,
                                   &fd) < 0)
         goto cleanup;
-    if (virSecurityManagerClearSocketLabel(h->driver->securityManager, h->vm->def) < 0)
+    if (qemuSecurityClearSocketLabel(h->driver->securityManager, h->vm->def) < 0)
         goto cleanup;
 
-    if (virProcessSetupPrivateMountNS() < 0)
-        goto cleanup;
-
-    if (qemuDomainBuildNamespace(h->driver, h->vm) < 0)
+    if (qemuDomainBuildNamespace(h->cfg, h->driver->securityManager, h->vm) < 0)
         goto cleanup;
 
     if (virDomainNumatuneGetMode(h->vm->def->numa, -1, &mode) == 0) {
@@ -3093,7 +3077,8 @@ qemuProcessRecoverJob(virQEMUDriverPtr driver,
               (job->asyncJob == QEMU_ASYNC_JOB_SAVE &&
                reason == VIR_DOMAIN_PAUSED_SAVE) ||
               (job->asyncJob == QEMU_ASYNC_JOB_SNAPSHOT &&
-               reason == VIR_DOMAIN_PAUSED_SNAPSHOT) ||
+               (reason == VIR_DOMAIN_PAUSED_SNAPSHOT ||
+                reason == VIR_DOMAIN_PAUSED_MIGRATION)) ||
               reason == VIR_DOMAIN_PAUSED_UNKNOWN)) {
              if (qemuProcessStartCPUs(driver, vm, conn,
                                       VIR_DOMAIN_RUNNING_UNPAUSED,
@@ -3262,8 +3247,8 @@ qemuProcessBuildDestroyHugepagesPath(virQEMUDriverPtr driver,
                     goto cleanup;
                 }
 
-                if (virSecurityManagerDomainSetPathLabel(driver->securityManager,
-                                                         vm->def, hugepagePath) < 0) {
+                if (qemuSecurityDomainSetPathLabel(driver->securityManager,
+                                                   vm->def, hugepagePath) < 0) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
                                    "%s", _("Unable to set huge path in security driver"));
                     goto cleanup;
@@ -3439,13 +3424,13 @@ qemuProcessReconnect(void *opaque)
     /* if domain requests security driver we haven't loaded, report error, but
      * do not kill the domain
      */
-    ignore_value(virSecurityManagerCheckAllLabel(driver->securityManager,
-                                                 obj->def));
+    ignore_value(qemuSecurityCheckAllLabel(driver->securityManager,
+                                           obj->def));
 
     if (qemuDomainRefreshVcpuInfo(driver, obj, QEMU_ASYNC_JOB_NONE, true) < 0)
         goto error;
 
-    if (virSecurityManagerReserveLabel(driver->securityManager, obj->def, obj->pid) < 0)
+    if (qemuSecurityReserveLabel(driver->securityManager, obj->def, obj->pid) < 0)
         goto error;
 
     if (qemuProcessNotifyNets(obj->def) < 0)
@@ -3722,7 +3707,6 @@ qemuProcessSPICEAllocatePorts(virQEMUDriverPtr driver,
     ret = 0;
 
  cleanup:
-    virPortAllocatorRelease(driver->remotePorts, port);
     virObjectUnref(cfg);
     return ret;
 }
@@ -3750,102 +3734,158 @@ qemuValidateCpuCount(virDomainDefPtr def,
 }
 
 
-static bool
-qemuProcessVerifyGuestCPU(virQEMUDriverPtr driver,
-                          virDomainObjPtr vm,
-                          int asyncJob)
+static int
+qemuProcessVerifyHypervFeatures(virDomainDefPtr def,
+                                virCPUDataPtr cpu)
+{
+    char *cpuFeature;
+    size_t i;
+    int rc;
+
+    for (i = 0; i < VIR_DOMAIN_HYPERV_LAST; i++) {
+        if (def->hyperv_features[i] != VIR_TRISTATE_SWITCH_ON)
+            continue;
+
+        if (virAsprintf(&cpuFeature, "__kvm_hv_%s",
+                        virDomainHypervTypeToString(i)) < 0)
+            return -1;
+
+        rc = virCPUDataCheckFeature(cpu, cpuFeature);
+        VIR_FREE(cpuFeature);
+
+        if (rc < 0)
+            return -1;
+        else if (rc == 1)
+            continue;
+
+        switch ((virDomainHyperv) i) {
+        case VIR_DOMAIN_HYPERV_RELAXED:
+        case VIR_DOMAIN_HYPERV_VAPIC:
+        case VIR_DOMAIN_HYPERV_SPINLOCKS:
+            VIR_WARN("host doesn't support hyperv '%s' feature",
+                     virDomainHypervTypeToString(i));
+            break;
+
+        case VIR_DOMAIN_HYPERV_VPINDEX:
+        case VIR_DOMAIN_HYPERV_RUNTIME:
+        case VIR_DOMAIN_HYPERV_SYNIC:
+        case VIR_DOMAIN_HYPERV_STIMER:
+        case VIR_DOMAIN_HYPERV_RESET:
+        case VIR_DOMAIN_HYPERV_VENDOR_ID:
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("host doesn't support hyperv '%s' feature"),
+                           virDomainHypervTypeToString(i));
+            return -1;
+
+        /* coverity[dead_error_begin] */
+        case VIR_DOMAIN_HYPERV_LAST:
+            break;
+        }
+    }
+
+    return 0;
+}
+
+
+static int
+qemuProcessVerifyKVMFeatures(virDomainDefPtr def,
+                             virCPUDataPtr cpu)
+{
+    int rc = 0;
+
+    if (def->features[VIR_DOMAIN_FEATURE_PVSPINLOCK] != VIR_TRISTATE_SWITCH_ON)
+        return 0;
+
+    rc = virCPUDataCheckFeature(cpu, VIR_CPU_x86_KVM_PV_UNHALT);
+
+    if (rc <= 0) {
+        if (rc == 0)
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("host doesn't support paravirtual spinlocks"));
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static int
+qemuProcessVerifyCPUFeatures(virDomainDefPtr def,
+                             virCPUDataPtr cpu)
+{
+    int rc;
+
+    rc = virCPUCheckFeature(def->os.arch, def->cpu, "invtsc");
+
+    if (rc < 0) {
+        return -1;
+    } else if (rc == 1) {
+        rc = virCPUDataCheckFeature(cpu, "invtsc");
+        if (rc <= 0) {
+            if (rc == 0) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("host doesn't support invariant TSC"));
+            }
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
+static int
+qemuProcessUpdateLiveGuestCPU(virQEMUDriverPtr driver,
+                              virDomainObjPtr vm,
+                              qemuDomainAsyncJob asyncJob)
 {
     virDomainDefPtr def = vm->def;
-    virArch arch = def->os.arch;
-    virCPUDataPtr guestcpu = NULL;
+    virCPUDataPtr cpu = NULL;
+    virCPUDataPtr disabled = NULL;
     qemuDomainObjPrivatePtr priv = vm->privateData;
     int rc;
-    bool ret = false;
-    size_t i;
+    int ret = -1;
 
-    switch (arch) {
-    case VIR_ARCH_I686:
-    case VIR_ARCH_X86_64:
+    if (ARCH_IS_X86(def->os.arch)) {
         if (qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob) < 0)
-            return false;
-        rc = qemuMonitorGetGuestCPU(priv->mon, arch, &guestcpu);
+            goto cleanup;
+
+        rc = qemuMonitorGetGuestCPU(priv->mon, def->os.arch, &cpu, &disabled);
+
         if (qemuDomainObjExitMonitor(driver, vm) < 0)
-            return false;
+            goto cleanup;
 
         if (rc < 0) {
             if (rc == -2)
-                break;
-
+                ret = 0;
             goto cleanup;
         }
 
-        if (def->features[VIR_DOMAIN_FEATURE_PVSPINLOCK] == VIR_TRISTATE_SWITCH_ON) {
-            if (!virCPUDataCheckFeature(guestcpu, VIR_CPU_x86_KVM_PV_UNHALT)) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("host doesn't support paravirtual spinlocks"));
-                goto cleanup;
-            }
+        if (qemuProcessVerifyKVMFeatures(def, cpu) < 0 ||
+            qemuProcessVerifyHypervFeatures(def, cpu) < 0)
+            goto cleanup;
+
+        if (!def->cpu ||
+            (def->cpu->mode == VIR_CPU_MODE_CUSTOM &&
+             !def->cpu->model)) {
+            ret = 0;
+            goto cleanup;
         }
 
-        for (i = 0; i < VIR_DOMAIN_HYPERV_LAST; i++) {
-            if (def->hyperv_features[i] == VIR_TRISTATE_SWITCH_ON) {
-                char *cpuFeature;
-                if (virAsprintf(&cpuFeature, "__kvm_hv_%s",
-                                virDomainHypervTypeToString(i)) < 0)
-                    goto cleanup;
-                if (!virCPUDataCheckFeature(guestcpu, cpuFeature)) {
-                    switch ((virDomainHyperv) i) {
-                    case VIR_DOMAIN_HYPERV_RELAXED:
-                    case VIR_DOMAIN_HYPERV_VAPIC:
-                    case VIR_DOMAIN_HYPERV_SPINLOCKS:
-                        VIR_WARN("host doesn't support hyperv '%s' feature",
-                                 virDomainHypervTypeToString(i));
-                        break;
-                    case VIR_DOMAIN_HYPERV_VPINDEX:
-                    case VIR_DOMAIN_HYPERV_RUNTIME:
-                    case VIR_DOMAIN_HYPERV_SYNIC:
-                    case VIR_DOMAIN_HYPERV_STIMER:
-                    case VIR_DOMAIN_HYPERV_RESET:
-                    case VIR_DOMAIN_HYPERV_VENDOR_ID:
-                        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                                       _("host doesn't support hyperv '%s' feature"),
-                                       virDomainHypervTypeToString(i));
-                        goto cleanup;
-                        break;
+        if (qemuProcessVerifyCPUFeatures(def, cpu) < 0)
+            goto cleanup;
 
-                    /* coverity[dead_error_begin] */
-                    case VIR_DOMAIN_HYPERV_LAST:
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (def->cpu && def->cpu->mode != VIR_CPU_MODE_HOST_PASSTHROUGH) {
-            for (i = 0; i < def->cpu->nfeatures; i++) {
-                virCPUFeatureDefPtr feature = &def->cpu->features[i];
-
-                if (feature->policy != VIR_CPU_FEATURE_REQUIRE)
-                    continue;
-
-                if (STREQ(feature->name, "invtsc") &&
-                    !virCPUDataCheckFeature(guestcpu, feature->name)) {
-                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                                   _("host doesn't support invariant TSC"));
-                    goto cleanup;
-                }
-            }
-        }
-        break;
-
-    default:
-        break;
+        if ((rc = virCPUUpdateLive(def->os.arch, def->cpu, cpu, disabled)) < 0)
+            goto cleanup;
+        else if (rc == 0)
+            def->cpu->check = VIR_CPU_CHECK_FULL;
     }
 
-    ret = true;
+    ret = 0;
 
  cleanup:
-    cpuDataFree(guestcpu);
+    virCPUDataFree(cpu);
+    virCPUDataFree(disabled);
     return ret;
 }
 
@@ -4453,8 +4493,8 @@ qemuProcessMakeDir(virQEMUDriverPtr driver,
         goto cleanup;
     }
 
-    if (virSecurityManagerDomainSetPathLabel(driver->securityManager,
-                                             vm->def, path) < 0)
+    if (qemuSecurityDomainSetPathLabel(driver->securityManager,
+                                       vm->def, path) < 0)
         goto cleanup;
 
     ret = 0;
@@ -4500,7 +4540,7 @@ qemuProcessStartWarnShmem(virDomainObjPtr vm)
     if (!shmem && vm->def->mem.nhugepages) {
         for (i = 0; i < virDomainNumaGetNodeCount(vm->def->numa); i++) {
             if (virDomainNumaGetNodeMemoryAccessMode(vm->def->numa, i) ==
-                VIR_NUMA_MEM_ACCESS_SHARED) {
+                VIR_DOMAIN_MEMORY_ACCESS_SHARED) {
                 shmem = true;
                 break;
             }
@@ -4588,6 +4628,57 @@ qemuProcessStartValidateVideo(virDomainObjPtr vm,
 
 
 static int
+qemuProcessStartValidateIOThreads(virDomainObjPtr vm,
+                                  virQEMUCapsPtr qemuCaps)
+{
+    size_t i;
+
+    if (vm->def->niothreadids > 0 &&
+        !virQEMUCapsGet(qemuCaps, QEMU_CAPS_OBJECT_IOTHREAD)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("IOThreads not supported for this QEMU"));
+        return -1;
+    }
+
+    for (i = 0; i < vm->def->ncontrollers; i++) {
+        virDomainControllerDefPtr cont = vm->def->controllers[i];
+
+        if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI &&
+            cont->model == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI &&
+            cont->iothread > 0 &&
+            !virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_SCSI_IOTHREAD)) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("IOThreads for virtio-scsi not supported for "
+                             "this QEMU"));
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
+static int
+qemuProcessStartValidateShmem(virDomainObjPtr vm)
+{
+    size_t i;
+
+    for (i = 0; i < vm->def->nshmems; i++) {
+        virDomainShmemDefPtr shmem = vm->def->shmems[i];
+
+        if (strchr(shmem->name, '/')) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("shmem name '%s' must not contain '/'"),
+                           shmem->name);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
+static int
 qemuProcessStartValidateXML(virQEMUDriverPtr driver,
                             virDomainObjPtr vm,
                             virQEMUCapsPtr qemuCaps,
@@ -4649,7 +4740,7 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
         }
 
         VIR_DEBUG("Checking domain and device security labels");
-        if (virSecurityManagerCheckAllLabel(driver->securityManager, vm->def) < 0)
+        if (qemuSecurityCheckAllLabel(driver->securityManager, vm->def) < 0)
             return -1;
 
     }
@@ -4661,6 +4752,12 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
         return -1;
 
     if (qemuProcessStartValidateVideo(vm, qemuCaps) < 0)
+        return -1;
+
+    if (qemuProcessStartValidateIOThreads(vm, qemuCaps) < 0)
+        return -1;
+
+    if (qemuProcessStartValidateShmem(vm) < 0)
         return -1;
 
     VIR_DEBUG("Checking for any possible (non-fatal) issues");
@@ -4727,9 +4824,14 @@ qemuProcessInit(virQEMUDriverPtr driver,
      */
     VIR_DEBUG("Setting current domain def as transient");
     if (virDomainObjSetDefTransient(caps, driver->xmlopt, vm) < 0)
-        goto stop;
+        goto cleanup;
 
-    if (!(flags & VIR_QEMU_PROCESS_START_PRETEND)) {
+    if (flags & VIR_QEMU_PROCESS_START_PRETEND) {
+        if (qemuDomainSetPrivatePaths(driver, vm) < 0) {
+            virDomainObjRemoveTransientDef(vm);
+            goto cleanup;
+        }
+    } else {
         vm->def->id = qemuDriverAllocateID(driver);
         qemuDomainSetFakeReboot(driver, vm, false);
         virDomainObjSetState(vm, VIR_DOMAIN_PAUSED, VIR_DOMAIN_PAUSED_STARTING_UP);
@@ -4742,10 +4844,10 @@ qemuProcessInit(virQEMUDriverPtr driver,
                                  VIR_HOOK_QEMU_OP_PREPARE,
                                  VIR_HOOK_SUBOP_BEGIN) < 0)
             goto stop;
-    }
 
-    if (qemuDomainSetPrivatePaths(driver, vm) < 0)
-        goto cleanup;
+        if (qemuDomainSetPrivatePaths(driver, vm) < 0)
+            goto stop;
+    }
 
     ret = 0;
 
@@ -5146,16 +5248,14 @@ qemuProcessUpdateGuestCPU(virDomainDefPtr def,
     if (def->cpu->mode == VIR_CPU_MODE_HOST_PASSTHROUGH)
         return 0;
 
-    /* custom CPUs in TCG mode don't need to be compared to host CPU */
-    if (def->virtType != VIR_DOMAIN_VIRT_QEMU ||
-        def->cpu->mode != VIR_CPU_MODE_CUSTOM) {
-        if (virCPUCompare(caps->host.arch, virQEMUCapsGetHostModel(qemuCaps),
-                          def->cpu, true) < 0)
-            return -1;
-    }
+    if (def->cpu->check == VIR_CPU_CHECK_PARTIAL &&
+        virCPUCompare(caps->host.arch,
+                      virQEMUCapsGetHostModel(qemuCaps, def->virtType),
+                      def->cpu, true) < 0)
+        return -1;
 
     if (virCPUUpdate(def->os.arch, def->cpu,
-                     virQEMUCapsGetHostModel(qemuCaps)) < 0)
+                     virQEMUCapsGetHostModel(qemuCaps, def->virtType)) < 0)
         goto cleanup;
 
     if (virQEMUCapsGetCPUDefinitions(qemuCaps, def->virtType,
@@ -5204,7 +5304,7 @@ qemuProcessPrepareDomain(virConnectPtr conn,
         /* If you are using a SecurityDriver with dynamic labelling,
            then generate a security label for isolation */
         VIR_DEBUG("Generating domain security label (if required)");
-        if (virSecurityManagerGenLabel(driver->securityManager, vm->def) < 0) {
+        if (qemuSecurityGenLabel(driver->securityManager, vm->def) < 0) {
             virDomainAuditSecurityLabel(vm, false);
             goto cleanup;
         }
@@ -5515,8 +5615,8 @@ qemuProcessLaunch(virConnectPtr conn,
     virCommandSetUmask(cmd, 0x002);
 
     VIR_DEBUG("Setting up security labelling");
-    if (virSecurityManagerSetChildProcessLabel(driver->securityManager,
-                                               vm->def, cmd) < 0)
+    if (qemuSecuritySetChildProcessLabel(driver->securityManager,
+                                         vm->def, cmd) < 0)
         goto cleanup;
 
     virCommandSetOutputFD(cmd, &logfile);
@@ -5526,10 +5626,10 @@ qemuProcessLaunch(virConnectPtr conn,
     virCommandDaemonize(cmd);
     virCommandRequireHandshake(cmd);
 
-    if (virSecurityManagerPreFork(driver->securityManager) < 0)
+    if (qemuSecurityPreFork(driver->securityManager) < 0)
         goto cleanup;
     rv = virCommandRun(cmd, NULL);
-    virSecurityManagerPostFork(driver->securityManager);
+    qemuSecurityPostFork(driver->securityManager);
 
     /* wait for qemu process to show up */
     if (rv == 0) {
@@ -5581,10 +5681,10 @@ qemuProcessLaunch(virConnectPtr conn,
         goto cleanup;
 
     VIR_DEBUG("Setting domain security labels");
-        if (qemuSecuritySetAllLabel(driver,
-                                    vm,
-                                    incoming ? incoming->path : NULL) < 0)
-            goto cleanup;
+    if (qemuSecuritySetAllLabel(driver,
+                                vm,
+                                incoming ? incoming->path : NULL) < 0)
+        goto cleanup;
 
     /* Security manager labeled all devices, therefore
      * if any operation from now on fails, we need to ask the caller to
@@ -5606,8 +5706,8 @@ qemuProcessLaunch(virConnectPtr conn,
             goto cleanup;
         }
         if (S_ISFIFO(stdin_sb.st_mode) &&
-            virSecurityManagerSetImageFDLabel(driver->securityManager,
-                                              vm->def, incoming->fd) < 0)
+            qemuSecuritySetImageFDLabel(driver->securityManager,
+                                        vm->def, incoming->fd) < 0)
             goto cleanup;
     }
 
@@ -5629,8 +5729,8 @@ qemuProcessLaunch(virConnectPtr conn,
     if (qemuConnectAgent(driver, vm) < 0)
         goto cleanup;
 
-    VIR_DEBUG("Detecting if required emulator features are present");
-    if (!qemuProcessVerifyGuestCPU(driver, vm, asyncJob))
+    VIR_DEBUG("Verifying and updating provided guest CPU");
+    if (qemuProcessUpdateLiveGuestCPU(driver, vm, asyncJob) < 0)
         goto cleanup;
 
     VIR_DEBUG("Setting up post-init cgroup restrictions");
@@ -6124,7 +6224,7 @@ void qemuProcessStop(virQEMUDriverPtr driver,
         qemuSecurityRestoreAllLabel(driver, vm,
                                     !!(flags & VIR_QEMU_PROCESS_STOP_MIGRATED));
 
-    virSecurityManagerReleaseLabel(driver->securityManager, vm->def);
+    qemuSecurityReleaseLabel(driver->securityManager, vm->def);
 
     for (i = 0; i < vm->def->ndisks; i++) {
         virDomainDeviceDef dev;
@@ -6270,8 +6370,6 @@ void qemuProcessStop(virQEMUDriverPtr driver,
         }
     }
 
-    qemuDomainDeleteNamespace(driver, vm);
-
     vm->taint = 0;
     vm->pid = -1;
     virDomainObjSetState(vm, VIR_DOMAIN_SHUTOFF, reason);
@@ -6370,13 +6468,13 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
     vm->pid = pid;
 
     VIR_DEBUG("Detect security driver config");
-    sec_managers = virSecurityManagerGetNested(driver->securityManager);
+    sec_managers = qemuSecurityGetNested(driver->securityManager);
     if (sec_managers == NULL)
         goto error;
 
     for (i = 0; sec_managers[i]; i++) {
         seclabelgen = false;
-        model = virSecurityManagerGetModel(sec_managers[i]);
+        model = qemuSecurityGetModel(sec_managers[i]);
         seclabeldef = virDomainDefGetSecurityLabelDef(vm->def, model);
         if (seclabeldef == NULL) {
             if (!(seclabeldef = virSecurityLabelDefNew(model)))
@@ -6386,8 +6484,8 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
         seclabeldef->type = VIR_DOMAIN_SECLABEL_STATIC;
         if (VIR_ALLOC(seclabel) < 0)
             goto error;
-        if (virSecurityManagerGetProcessLabel(sec_managers[i],
-                                              vm->def, vm->pid, seclabel) < 0)
+        if (qemuSecurityGetProcessLabel(sec_managers[i], vm->def,
+                                        vm->pid, seclabel) < 0)
             goto error;
 
         if (VIR_STRDUP(seclabeldef->model, model) < 0)
@@ -6404,9 +6502,9 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
         }
     }
 
-    if (virSecurityManagerCheckAllLabel(driver->securityManager, vm->def) < 0)
+    if (qemuSecurityCheckAllLabel(driver->securityManager, vm->def) < 0)
         goto error;
-    if (virSecurityManagerGenLabel(driver->securityManager, vm->def) < 0)
+    if (qemuSecurityGenLabel(driver->securityManager, vm->def) < 0)
         goto error;
 
     if (qemuDomainPerfRestart(vm) < 0)

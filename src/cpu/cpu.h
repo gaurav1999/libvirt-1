@@ -70,8 +70,10 @@ typedef int
 typedef void
 (*cpuArchDataFree)  (virCPUDataPtr data);
 
-typedef virCPUDataPtr
-(*cpuArchNodeData)  (virArch arch);
+typedef int
+(*virCPUArchGetHost)(virCPUDefPtr cpu,
+                     const char **models,
+                     unsigned int nmodels);
 
 typedef virCPUDefPtr
 (*cpuArchBaseline)  (virCPUDefPtr *cpus,
@@ -83,6 +85,11 @@ typedef virCPUDefPtr
 typedef int
 (*virCPUArchUpdate)(virCPUDefPtr guest,
                     const virCPUDef *host);
+
+typedef int
+(*virCPUArchUpdateLive)(virCPUDefPtr cpu,
+                        virCPUDataPtr dataEnabled,
+                        virCPUDataPtr dataDisabled);
 
 typedef int
 (*virCPUArchCheckFeature)(const virCPUDef *cpu,
@@ -116,10 +123,11 @@ struct cpuArchDriver {
     virCPUArchCompare   compare;
     cpuArchDecode       decode;
     cpuArchEncode       encode;
-    cpuArchDataFree     free;
-    cpuArchNodeData     nodeData;
+    cpuArchDataFree     dataFree;
+    virCPUArchGetHost   getHost;
     cpuArchBaseline     baseline;
     virCPUArchUpdate    update;
+    virCPUArchUpdateLive updateLive;
     virCPUArchCheckFeature checkFeature;
     virCPUArchDataCheckFeature dataCheckFeature;
     virCPUArchDataFormat dataFormat;
@@ -162,11 +170,18 @@ cpuEncode   (virArch arch,
              virCPUDataPtr *vendor)
     ATTRIBUTE_NONNULL(2);
 
-void
-cpuDataFree (virCPUDataPtr data);
-
 virCPUDataPtr
-cpuNodeData (virArch arch);
+virCPUDataNew(virArch arch);
+
+void
+virCPUDataFree(virCPUDataPtr data);
+
+virCPUDefPtr
+virCPUGetHost(virArch arch,
+              virCPUType type,
+              virNodeInfoPtr nodeInfo,
+              const char **models,
+              unsigned int nmodels);
 
 char *
 cpuBaselineXML(const char **xmlCPUs,
@@ -189,6 +204,12 @@ virCPUUpdate(virArch arch,
              const virCPUDef *host)
     ATTRIBUTE_NONNULL(2);
 
+int
+virCPUUpdateLive(virArch arch,
+                 virCPUDefPtr cpu,
+                 virCPUDataPtr dataEnabled,
+                 virCPUDataPtr dataDisabled)
+    ATTRIBUTE_NONNULL(2);
 
 int
 virCPUCheckFeature(virArch arch,

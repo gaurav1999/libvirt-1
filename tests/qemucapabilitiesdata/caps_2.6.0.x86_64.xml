@@ -25,7 +25,6 @@
   <flag name='boot-index'/>
   <flag name='hda-duplex'/>
   <flag name='drive-aio'/>
-  <flag name='pci-multibus'/>
   <flag name='pci-bootindex'/>
   <flag name='ccid-emulated'/>
   <flag name='ccid-passthru'/>
@@ -198,6 +197,7 @@
   <flag name='query-qmp-schema'/>
   <flag name='vhost-scsi'/>
   <flag name='drive-iotune-group'/>
+  <flag name='query-cpu-definitions'/>
   <version>2006000</version>
   <kvmVersion>0</kvmVersion>
   <package></package>

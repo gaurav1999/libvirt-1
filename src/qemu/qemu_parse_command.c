@@ -417,7 +417,7 @@ qemuParseKeywords(const char *str,
 
         endmark = start;
         do {
-            /* Qemu accepts ',,' as an escape for a literal comma;
+            /* QEMU accepts ',,' as an escape for a literal comma;
              * skip past those here while searching for the end of the
              * value, then strip them down below */
             endmark = strchr(endmark, ',');
@@ -1441,8 +1441,7 @@ qemuParseCommandLineCPU(virDomainDefPtr dom,
             if (*feature == '\0')
                 goto syntax;
 
-            if (dom->os.arch != VIR_ARCH_X86_64 &&
-                dom->os.arch != VIR_ARCH_I686) {
+            if (!ARCH_IS_X86(dom->os.arch)) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("%s platform doesn't support CPU features'"),
                                virArchToString(dom->os.arch));
@@ -1606,7 +1605,7 @@ qemuParseCommandLineCPU(virDomainDefPtr dom,
                 goto cleanup;
 
             is_32bit = (virCPUDataCheckFeature(cpuData, "lm") != 1);
-            cpuDataFree(cpuData);
+            virCPUDataFree(cpuData);
         } else if (model) {
             is_32bit = STREQ(model, "qemu32");
         }
@@ -1863,8 +1862,7 @@ qemuParseCommandLine(virCapsPtr caps,
     else
         def->os.arch = VIR_ARCH_I686;
 
-    if ((def->os.arch == VIR_ARCH_I686) ||
-        (def->os.arch == VIR_ARCH_X86_64))
+    if (ARCH_IS_X86(def->os.arch))
         def->features[VIR_DOMAIN_FEATURE_ACPI] = VIR_TRISTATE_SWITCH_ON;
 
 #define WANT_VALUE()                                                   \

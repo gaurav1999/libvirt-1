@@ -6287,9 +6287,9 @@ virDomainUndefine(virDomainPtr domain)
  * whether this flag is present.  On hypervisors where snapshots do
  * not use libvirt metadata, this flag has no effect.
  *
- * If the domain has any nvram specified, then including
- * VIR_DOMAIN_UNDEFINE_NVRAM will also remove that file, and omitting the flag
- * will cause the undefine process to fail.
+ * If the domain has any nvram specified, the undefine process will fail
+ * unless VIR_DOMAIN_UNDEFINE_KEEP_NVRAM is specified, or if
+ * VIR_DOMAIN_UNDEFINE_NVRAM is specified to remove the nvram file.
  *
  * Returns 0 in case of success, -1 in case of error
  */
@@ -11250,6 +11250,31 @@ virConnectGetDomainCapabilities(virConnectPtr conn,
  *                             CPU frequency scaling by applications running
  *                             as unsigned long long. It is produced by the
  *                             ref_cpu_cycles perf event.
+ *     "perf.cpu_clock" - The count of cpu clock time as unsigned long long.
+ *                        It is produced by the cpu_clock perf event.
+ *     "perf.task_clock" - The count of task clock time as unsigned long long.
+ *                         It is produced by the task_clock perf event.
+ *     "perf.page_faults" - The count of page faults as unsigned long long.
+ *                          It is produced by the page_faults perf event
+ *     "perf.context_switches" - The count of context switches as unsigned long
+ *                               long. It is produced by the context_switches
+ *                               perf event.
+ *     "perf.cpu_migrations" - The count of cpu migrations, from one logical
+ *                             processor to another, as unsigned long
+ *                             long. It is produced by the cpu_migrations
+ *                             perf event.
+ *     "perf.page_faults_min" - The count of minor page faults as unsigned
+ *                              long long. It is produced by the
+ *                              page_faults_min perf event.
+ *     "perf.page_faults_maj" - The count of major page faults as unsigned
+ *                              long long. It is produced by the
+ *                              page_faults_maj perf event.
+ *     "perf.alignment_faults" - The count of alignment faults as unsigned
+ *                               long long. It is produced by the
+ *                               alignment_faults perf event
+ *     "perf.emulation_faults" - The count of emulation faults as unsigned
+ *                               long long. It is produced by the
+ *                               emulation_faults perf event
  *
  * Note that entire stats groups or individual stat fields may be missing from
  * the output in case they are not supported by the given hypervisor, are not
@@ -11738,6 +11763,54 @@ virDomainSetGuestVcpus(virDomainPtr domain,
         int ret;
         ret = domain->conn->driver->domainSetGuestVcpus(domain, cpumap, state,
                                                         flags);
+        if (ret < 0)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(domain->conn);
+    return -1;
+}
+
+
+/**
+ * virDomainSetVcpu:
+ * @domain: pointer to domain object
+ * @vcpumap: text representation of a bitmap of vcpus to set
+ * @state: 0 to disable/1 to enable cpus described by @vcpumap
+ * @flags: bitwise-OR of virDomainModificationImpact
+ *
+ * Enables/disables individual vcpus described by @vcpumap in the hypervisor.
+ *
+ * Various hypervisor implementations may limit to operate on just 1
+ * hotpluggable entity (which may contain multiple vCPUs on certain platforms).
+ *
+ * Note that OSes and hypervisors may require vCPU 0 to stay online.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+int
+virDomainSetVcpu(virDomainPtr domain,
+                 const char *vcpumap,
+                 int state,
+                 unsigned int flags)
+{
+    VIR_DOMAIN_DEBUG(domain, "vcpumap='%s' state=%i flags=%x",
+                     NULLSTR(vcpumap), state, flags);
+
+    virResetLastError();
+
+    virCheckDomainReturn(domain, -1);
+    virCheckReadOnlyGoto(domain->conn->flags, error);
+
+    virCheckNonNullArgGoto(vcpumap, error);
+
+    if (domain->conn->driver->domainSetVcpu) {
+        int ret;
+        ret = domain->conn->driver->domainSetVcpu(domain, vcpumap, state, flags);
         if (ret < 0)
             goto error;
         return ret;

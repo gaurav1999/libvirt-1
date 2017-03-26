@@ -37,6 +37,8 @@ from docs/hacking.html.in!
 <xsl:value-of select="normalize-space(.)"/>
 <xsl:text>
                          </xsl:text>======================
+
+
 </xsl:template>
 
 
@@ -93,20 +95,13 @@ from docs/hacking.html.in!
 
 
 
-<xsl:template match="html:ol|html:ul|html:p">
+<xsl:template match="html:p">
 <xsl:apply-templates/><xsl:value-of select="$newline"/><xsl:value-of select="$newline"/>
 </xsl:template>
 
 
 
-<xsl:template match="html:ol/html:li">
-<xsl:choose>
-<xsl:when test=".//node()[position()=last()]/self::pre">(<xsl:value-of select="position()"/>) <xsl:apply-templates/>
-</xsl:when>
-<!-- only append two newlines when the last element isn't a pre element -->
-<xsl:otherwise>(<xsl:value-of select="position()"/>) <xsl:apply-templates/><xsl:value-of select="$newline"/><xsl:value-of select="$newline"/>
-</xsl:otherwise>
-</xsl:choose>
+<xsl:template match="html:ol/html:li">(<xsl:value-of select="position()"/>) <xsl:apply-templates/>
 </xsl:template>
 
 
@@ -119,6 +114,10 @@ from docs/hacking.html.in!
 <xsl:template match="html:li/html:ul/html:li">-- <xsl:apply-templates/><xsl:value-of select="$newline"/><xsl:value-of select="$newline"/>
 </xsl:template>
 
+<xsl:template match="html:dl/html:dt">*<xsl:apply-templates/>*<xsl:value-of select="$newline"/><xsl:value-of select="$newline"/>
+</xsl:template>
+<xsl:template match="html:dl/html:dd"><xsl:apply-templates/><xsl:value-of select="$newline"/><xsl:value-of select="$newline"/>
+</xsl:template>
 
 
 <!-- add newline before nested <ul> -->

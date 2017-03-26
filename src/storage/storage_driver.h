@@ -27,7 +27,7 @@
 # include <sys/stat.h>
 
 # include "domain_conf.h"
-# include "storage_conf.h"
+# include "virstorageobj.h"
 # include "virstoragefile.h"
 
 int virStorageFileInit(virStorageSourcePtr src);
@@ -44,9 +44,9 @@ ssize_t virStorageFileReadHeader(virStorageSourcePtr src,
                                  char **buf);
 const char *virStorageFileGetUniqueIdentifier(virStorageSourcePtr src);
 int virStorageFileAccess(virStorageSourcePtr src, int mode);
-int virStorageFileChown(virStorageSourcePtr src, uid_t uid, gid_t gid);
+int virStorageFileChown(const virStorageSource *src, uid_t uid, gid_t gid);
 
-bool virStorageFileSupportsSecurityDriver(virStorageSourcePtr src);
+bool virStorageFileSupportsSecurityDriver(const virStorageSource *src);
 
 int virStorageFileGetMetadata(virStorageSourcePtr src,
                               uid_t uid, gid_t gid,
@@ -70,5 +70,6 @@ char *virStoragePoolObjBuildTempFilePath(virStoragePoolObjPtr pool,
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 
 int storageRegister(void);
+int storageRegisterAll(void);
 
 #endif /* __VIR_STORAGE_DRIVER_H__ */

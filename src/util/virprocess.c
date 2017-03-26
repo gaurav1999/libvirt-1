@@ -1183,8 +1183,14 @@ virProcessRunInMountNamespace(pid_t pid,
         VIR_FORCE_CLOSE(errfd[1]);
         ignore_value(virFileReadHeaderFD(errfd[0], 1024, &buf));
         ret = virProcessWait(child, &status, false);
-        if (!ret)
+        if (!ret) {
             ret = status == EXIT_CANCELED ? -1 : status;
+            if (ret) {
+                virReportError(VIR_ERR_INTERNAL_ERROR,
+                               _("child reported: %s"),
+                               NULLSTR(buf));
+            }
+        }
         VIR_FREE(buf);
     }
 
@@ -1229,6 +1235,78 @@ virProcessSetupPrivateMountNS(void)
 }
 #endif /* !defined(HAVE_SYS_MOUNT_H) || !defined(HAVE_UNSHARE) */
 
+#if defined(__linux__)
+ATTRIBUTE_NORETURN static int
+virProcessDummyChild(void *argv ATTRIBUTE_UNUSED)
+{
+    _exit(0);
+}
+
+/**
+ * virProcessNamespaceAvailable:
+ * @ns: what namespaces to check (bitwise-OR of virProcessNamespaceFlags)
+ *
+ * Check if given list of namespaces (@ns) is available.
+ * If not, appropriate error message is produced.
+ *
+ * Returns: 0 on success (all the namespaces from @flags are available),
+ *         -1 on error (with error message reported).
+ */
+int
+virProcessNamespaceAvailable(unsigned int ns)
+{
+    int flags = 0;
+    int cpid;
+    char *childStack;
+    char *stack;
+    int stacksize = getpagesize() * 4;
+
+    if (ns & VIR_PROCESS_NAMESPACE_MNT)
+        flags |= CLONE_NEWNS;
+    if (ns & VIR_PROCESS_NAMESPACE_IPC)
+        flags |= CLONE_NEWIPC;
+    if (ns & VIR_PROCESS_NAMESPACE_NET)
+        flags |= CLONE_NEWNET;
+    if (ns & VIR_PROCESS_NAMESPACE_PID)
+        flags |= CLONE_NEWPID;
+    if (ns & VIR_PROCESS_NAMESPACE_USER)
+        flags |= CLONE_NEWUSER;
+    if (ns & VIR_PROCESS_NAMESPACE_UTS)
+        flags |= CLONE_NEWUTS;
+
+    /* Signal parent as soon as the child dies. RIP. */
+    flags |= SIGCHLD;
+
+    if (VIR_ALLOC_N(stack, stacksize) < 0)
+        return -1;
+
+    childStack = stack + stacksize;
+
+    cpid = clone(virProcessDummyChild, childStack, flags, NULL);
+    VIR_FREE(stack);
+    if (cpid < 0) {
+        char ebuf[1024] ATTRIBUTE_UNUSED;
+        VIR_DEBUG("clone call returned %s, container support is not enabled",
+                  virStrerror(errno, ebuf, sizeof(ebuf)));
+        return -1;
+    } else if (virProcessWait(cpid, NULL, false) < 0) {
+        return -1;
+    }
+
+    VIR_DEBUG("All namespaces (%x) are enabled", ns);
+    return 0;
+}
+
+#else /* !defined(__linux__) */
+
+int
+virProcessNamespaceAvailable(unsigned int ns ATTRIBUTE_UNUSED)
+{
+    virReportSystemError(ENOSYS, "%s",
+                         _("Namespaces are not supported on this platform."));
+    return -1;
+}
+#endif /* !defined(__linux__) */
 
 /**
  * virProcessExitWithStatus:

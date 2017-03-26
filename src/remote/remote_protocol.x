@@ -86,7 +86,7 @@ const REMOTE_STORAGE_POOL_LIST_MAX = 4096;
 const REMOTE_STORAGE_VOL_LIST_MAX = 16384;
 
 /* Upper limit on lists of node devices. */
-const REMOTE_NODE_DEVICE_LIST_MAX = 16384;
+const REMOTE_NODE_DEVICE_LIST_MAX = 65536;
 
 /* Upper limit on lists of node device capabilities. */
 const REMOTE_NODE_DEVICE_CAPS_LIST_MAX = 65536;
@@ -319,6 +319,7 @@ typedef remote_nonnull_nwfilter *remote_nwfilter;
 typedef remote_nonnull_storage_pool *remote_storage_pool;
 typedef remote_nonnull_storage_vol *remote_storage_vol;
 typedef remote_nonnull_node_device *remote_node_device;
+typedef remote_nonnull_secret *remote_secret;
 
 /* Error message. See <virterror.h> for explanation of fields. */
 
@@ -3352,6 +3353,45 @@ struct remote_domain_set_guest_vcpus_args {
     unsigned int flags;
 };
 
+struct remote_domain_set_vcpu_args {
+    remote_nonnull_domain dom;
+    remote_nonnull_string cpumap;
+    int state;
+    unsigned int flags;
+};
+
+
+struct remote_domain_event_callback_metadata_change_msg {
+    int callbackID;
+    remote_nonnull_domain dom;
+    int type;
+    remote_string nsuri;
+};
+
+struct remote_connect_secret_event_register_any_args {
+    int eventID;
+    remote_secret secret;
+};
+
+struct remote_connect_secret_event_register_any_ret {
+    int callbackID;
+};
+
+struct remote_connect_secret_event_deregister_any_args {
+    int callbackID;
+};
+
+struct remote_secret_event_lifecycle_msg {
+    int callbackID;
+    remote_nonnull_secret secret;
+    int event;
+    int detail;
+};
+
+struct remote_secret_event_value_changed_msg {
+    int callbackID;
+    remote_nonnull_secret secret;
+};
 
 /*----- Protocol. -----*/
 
@@ -4752,7 +4792,7 @@ enum remote_procedure {
     REMOTE_PROC_DOMAIN_EVENT_IO_ERROR_REASON = 195,
 
     /**
-     * @generate: server
+     * @generate: both
      * @acl: domain:start
      */
     REMOTE_PROC_DOMAIN_CREATE_WITH_FLAGS = 196,
@@ -5952,5 +5992,46 @@ enum remote_procedure {
      * @priority: high
      * @acl: storage_vol:read
      */
-    REMOTE_PROC_STORAGE_VOL_GET_INFO_FLAGS = 378
+    REMOTE_PROC_STORAGE_VOL_GET_INFO_FLAGS = 378,
+
+    /**
+     * @generate: both
+     * @acl: none
+     */
+    REMOTE_PROC_DOMAIN_EVENT_CALLBACK_METADATA_CHANGE = 379,
+
+    /**
+     * @generate: none
+     * @priority: high
+     * @acl: connect:search_secrets
+     * @aclfilter: secret:getattr
+     */
+    REMOTE_PROC_CONNECT_SECRET_EVENT_REGISTER_ANY = 380,
+
+    /**
+     * @generate: none
+     * @priority: high
+     * @acl: connect:read
+     */
+    REMOTE_PROC_CONNECT_SECRET_EVENT_DEREGISTER_ANY = 381,
+
+    /**
+     * @generate: both
+     * @acl: none
+     */
+    REMOTE_PROC_SECRET_EVENT_LIFECYCLE = 382,
+
+    /**
+     * @generate: both
+     * @acl: none
+     */
+    REMOTE_PROC_SECRET_EVENT_VALUE_CHANGED = 383,
+
+    /**
+     * @generate: both
+     * @acl: domain:write
+     * @acl: domain:save:!VIR_DOMAIN_AFFECT_CONFIG|VIR_DOMAIN_AFFECT_LIVE
+     * @acl: domain:save:VIR_DOMAIN_AFFECT_CONFIG
+     */
+    REMOTE_PROC_DOMAIN_SET_VCPU = 384
 };

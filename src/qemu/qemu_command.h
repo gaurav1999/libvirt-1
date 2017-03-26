@@ -101,7 +101,8 @@ char *qemuBuildNicDevStr(virDomainDefPtr def,
                          int vlan,
                          unsigned int bootindex,
                          size_t vhostfdSize,
-                         virQEMUCapsPtr qemuCaps);
+                         virQEMUCapsPtr qemuCaps,
+                         unsigned int mtu);
 
 char *qemuDeviceDriveHostAlias(virDomainDiskDefPtr disk);
 
@@ -123,16 +124,13 @@ char *qemuBuildControllerDevStr(const virDomainDef *domainDef,
                                 virQEMUCapsPtr qemuCaps,
                                 int *nusbcontroller);
 
-int qemuBuildMemoryBackendStr(unsigned long long size,
-                              unsigned long long pagesize,
-                              int guestNode,
-                              virBitmapPtr userNodeset,
-                              virBitmapPtr autoNodeset,
-                              virDomainDefPtr def,
-                              virQEMUCapsPtr qemuCaps,
-                              virQEMUDriverConfigPtr cfg,
+int qemuBuildMemoryBackendStr(virJSONValuePtr *backendProps,
                               const char **backendType,
-                              virJSONValuePtr *backendProps,
+                              virQEMUDriverConfigPtr cfg,
+                              virQEMUCapsPtr qemuCaps,
+                              virDomainDefPtr def,
+                              virDomainMemoryDefPtr mem,
+                              virBitmapPtr autoNodeset,
                               bool force);
 
 char *qemuBuildMemoryDeviceStr(virDomainMemoryDefPtr mem);

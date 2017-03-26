@@ -24,8 +24,9 @@
       (<span class="since">since 0.9.13</span>), <code>sheepdog</code>
       (<span class="since">since 0.10.0</span>),
       <code>gluster</code> (<span class="since">since
-      1.2.0</span>) or <code>zfs</code> (<span class="since">since
-      1.2.8</span>). This corresponds to the
+      1.2.0</span>),  <code>zfs</code> (<span class="since">since
+      1.2.8</span>) or <code>vstorage</code> (<span class="since">since
+      3.1.0</span>). This corresponds to the
       storage backend drivers listed further along in this document.
     </p>
     <h3><a name="StoragePoolFirst">General metadata</a></h3>
@@ -124,7 +125,7 @@
       <dt><code>device</code></dt>
       <dd>Provides the source for pools backed by physical devices
         (pool types <code>fs</code>, <code>logical</code>, <code>disk</code>,
-        <code>iscsi</code>, <code>zfs</code>).
+        <code>iscsi</code>, <code>zfs</code>, <code>vstorage</code>).
         May be repeated multiple times depending on backend driver. Contains
         a required attribute <code>path</code> which is either the fully
         qualified path to the block device node or for <code>iscsi</code>
@@ -138,7 +139,10 @@
         causes libvirt to attempt to generate and find target volume path's
         using a "p" separator. The default algorithm used by device mapper
         is to add the "p" separator only when the source device path ends
-        with a number.
+        with a number; however, it's possible to configure the devmapper
+        device to not use 'user_friendly_names' thus creating partitions
+        with the "p" separator even when the device source path does not
+        end with a number.
         <span class="since">Since 1.3.1</span></p></dd>
       <dt><code>dir</code></dt>
       <dd>Provides the source for pools backed by directories (pool
@@ -236,6 +240,23 @@
             used in order to ensure a new definition doesn't duplicate using
             the scsi_hostN of some existing storage pool.
             <span class="since">Since 1.0.4</span>
+          </dd>
+          <dt><code>parent_wwnn</code> and <code>parent_wwpn</code></dt>
+          <dd>Instead of the <code>parent</code> to specify which scsi_host
+            to use by name, it's possible to provide the wwnn and wwpn of
+            the parent to be used for the vHBA in order to ensure that
+            between reboots or after a hardware configuration change that
+            the scsi_host parent name doesn't change. Both the parent_wwnn
+            and parent_wwpn must be provided.
+            <span class="since">Since 3.0.0</span>
+          </dd>
+          <dt><code>parent_fabric_wwn</code></dt>
+          <dd>Instead of the <code>parent</code> to specify which scsi_host
+            to use by name, it's possible to provide the fabric_wwn on which
+            the scsi_host exists. This provides flexibility for choosing
+            a scsi_host that may be available on the fabric rather than
+            requiring a specific parent by wwnn or wwpn to be available.
+            <span class="since">Since 3.0.0</span>
           </dd>
           <dt><code>managed</code></dt>
           <dd>An optional attribute to instruct the SCSI storage backend to
@@ -435,24 +456,6 @@
         will be filled with the values used by the existing directory.
         <span class="since">Since 1.2.16</span>
       </dd>
-      <dt><code>timestamps</code></dt>
-      <dd>Provides timing information about the volume. Up to four
-        sub-elements are present,
-        where <code>atime</code>, <code>btime</code>, <code>ctime</code>
-        and <code>mtime</code> hold the access, birth, change and
-        modification time of the volume, where known. The used time
-        format is &lt;seconds&gt;.&lt;nanoseconds&gt; since the
-        beginning of the epoch (1 Jan 1970). If nanosecond resolution
-        is 0 or otherwise unsupported by the host OS or filesystem,
-        then the nanoseconds part is omitted.  This is a readonly
-        attribute and is ignored when creating a volume.
-        <span class="since">Since 0.10.0</span>
-      </dd>
-      <dt><code>encryption</code></dt>
-      <dd>If present, specifies how the volume is encrypted.  See
-        the <a href="formatstorageencryption.html">Storage Encryption</a> page
-        for more information.
-      </dd>
     </dl>
 
     <h3><a name="StoragePoolExtents">Device extents</a></h3>
@@ -636,6 +639,24 @@
         For existing directory or filesystem based volumes, these fields
         will be filled with the values used by the existing file.
         <span class="since">Since 0.4.1</span>
+      </dd>
+      <dt><code>timestamps</code></dt>
+      <dd>Provides timing information about the volume. Up to four
+        sub-elements are present,
+        where <code>atime</code>, <code>btime</code>, <code>ctime</code>
+        and <code>mtime</code> hold the access, birth, change and
+        modification time of the volume, where known. The used time
+        format is &lt;seconds&gt;.&lt;nanoseconds&gt; since the
+        beginning of the epoch (1 Jan 1970). If nanosecond resolution
+        is 0 or otherwise unsupported by the host OS or filesystem,
+        then the nanoseconds part is omitted.  This is a readonly
+        attribute and is ignored when creating a volume.
+        <span class="since">Since 0.10.0</span>
+      </dd>
+      <dt><code>encryption</code></dt>
+      <dd>If present, specifies how the volume is encrypted.  See
+        the <a href="formatstorageencryption.html">Storage Encryption</a> page
+        for more information.
       </dd>
       <dt><code>compat</code></dt>
       <dd>Specify compatibility level. So far, this is only used for

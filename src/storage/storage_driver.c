@@ -51,6 +51,7 @@
 #include "virstring.h"
 #include "viraccessapicheck.h"
 #include "dirname.h"
+#include "storage_util.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -266,13 +267,13 @@ storageStateInitialize(bool privileged,
         goto error;
     }
 
-    if (virStoragePoolLoadAllState(&driver->pools,
-                                   driver->stateDir) < 0)
+    if (virStoragePoolObjLoadAllState(&driver->pools,
+                                      driver->stateDir) < 0)
         goto error;
 
-    if (virStoragePoolLoadAllConfigs(&driver->pools,
-                                     driver->configDir,
-                                     driver->autostartDir) < 0)
+    if (virStoragePoolObjLoadAllConfigs(&driver->pools,
+                                        driver->configDir,
+                                        driver->autostartDir) < 0)
         goto error;
 
     storagePoolUpdateAllState();
@@ -322,11 +323,11 @@ storageStateReload(void)
         return -1;
 
     storageDriverLock();
-    virStoragePoolLoadAllState(&driver->pools,
-                               driver->stateDir);
-    virStoragePoolLoadAllConfigs(&driver->pools,
-                                 driver->configDir,
-                                 driver->autostartDir);
+    virStoragePoolObjLoadAllState(&driver->pools,
+                                  driver->stateDir);
+    virStoragePoolObjLoadAllConfigs(&driver->pools,
+                                    driver->configDir,
+                                    driver->autostartDir);
     storageDriverAutostart();
     storageDriverUnlock();
 
@@ -694,7 +695,7 @@ storagePoolCreateXML(virConnectPtr conn,
     if (virStoragePoolObjIsDuplicate(&driver->pools, def, 1) < 0)
         goto cleanup;
 
-    if (virStoragePoolSourceFindDuplicate(conn, &driver->pools, def) < 0)
+    if (virStoragePoolObjSourceFindDuplicate(conn, &driver->pools, def) < 0)
         goto cleanup;
 
     if ((backend = virStorageBackendForType(def->type)) == NULL)
@@ -789,7 +790,7 @@ storagePoolDefineXML(virConnectPtr conn,
     if (virStoragePoolObjIsDuplicate(&driver->pools, def, 0) < 0)
         goto cleanup;
 
-    if (virStoragePoolSourceFindDuplicate(conn, &driver->pools, def) < 0)
+    if (virStoragePoolObjSourceFindDuplicate(conn, &driver->pools, def) < 0)
         goto cleanup;
 
     if (virStorageBackendForType(def->type) == NULL)
@@ -1618,6 +1619,7 @@ storageVolLookupByPath(virConnectPtr conn,
             case VIR_STORAGE_POOL_ISCSI:
             case VIR_STORAGE_POOL_SCSI:
             case VIR_STORAGE_POOL_MPATH:
+            case VIR_STORAGE_POOL_VSTORAGE:
                 stable_path = virStorageBackendStablePath(pool,
                                                           cleanpath,
                                                           false);
@@ -2836,8 +2838,11 @@ static virStateDriver stateDriver = {
     .stateReload = storageStateReload,
 };
 
-int storageRegister(void)
+static int
+storageRegisterFull(bool allbackends)
 {
+    if (virStorageBackendDriversRegister(allbackends) < 0)
+        return -1;
     if (virSetSharedStorageDriver(&storageDriver) < 0)
         return -1;
     if (virRegisterStateDriver(&stateDriver) < 0)
@@ -2846,9 +2851,23 @@ int storageRegister(void)
 }
 
 
+int
+storageRegister(void)
+{
+    return storageRegisterFull(false);
+}
+
+
+int
+storageRegisterAll(void)
+{
+    return storageRegisterFull(true);
+}
+
+
 /* ----------- file handlers cooperating with storage driver --------------- */
 static bool
-virStorageFileIsInitialized(virStorageSourcePtr src)
+virStorageFileIsInitialized(const virStorageSource *src)
 {
     return src && src->drv;
 }
@@ -2888,7 +2907,7 @@ virStorageFileSupportsBackingChainTraversal(virStorageSourcePtr src)
  * driver to perform labelling
  */
 bool
-virStorageFileSupportsSecurityDriver(virStorageSourcePtr src)
+virStorageFileSupportsSecurityDriver(const virStorageSource *src)
 {
     int actualType;
     virStorageFileBackendPtr backend;
@@ -3179,7 +3198,7 @@ virStorageFileAccess(virStorageSourcePtr src,
  * by libvirt storage backend.
  */
 int
-virStorageFileChown(virStorageSourcePtr src,
+virStorageFileChown(const virStorageSource *src,
                     uid_t uid,
                     gid_t gid)
 {
@@ -3501,6 +3520,7 @@ virStorageTranslateDiskSourcePool(virConnectPtr conn,
     case VIR_STORAGE_POOL_DISK:
     case VIR_STORAGE_POOL_SCSI:
     case VIR_STORAGE_POOL_ZFS:
+    case VIR_STORAGE_POOL_VSTORAGE:
         if (!(def->src->path = virStorageVolGetPath(vol)))
             goto cleanup;
 

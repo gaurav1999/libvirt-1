@@ -8,7 +8,7 @@
     <type arch='i686' machine='pc'>hvm</type>
     <boot dev='network'/>
   </os>
-  <cpu mode='custom' match='exact'>
+  <cpu mode='custom' match='exact' check='partial'>
     <model fallback='allow'>core2duo</model>
   </cpu>
   <clock offset='utc'>

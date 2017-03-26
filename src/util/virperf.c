@@ -43,7 +43,11 @@ VIR_ENUM_IMPL(virPerfEvent, VIR_PERF_EVENT_LAST,
               "cache_references", "cache_misses",
               "branch_instructions", "branch_misses",
               "bus_cycles", "stalled_cycles_frontend",
-              "stalled_cycles_backend", "ref_cpu_cycles");
+              "stalled_cycles_backend", "ref_cpu_cycles",
+              "cpu_clock", "task_clock", "page_faults",
+              "context_switches", "cpu_migrations",
+              "page_faults_min", "page_faults_maj",
+              "alignment_faults", "emulation_faults");
 
 struct virPerfEvent {
     int type;
@@ -112,6 +116,33 @@ static struct virPerfEventAttr attrs[] = {
      .attrConfig = 0,
 # endif
     },
+    {.type = VIR_PERF_EVENT_CPU_CLOCK,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_CPU_CLOCK},
+    {.type = VIR_PERF_EVENT_TASK_CLOCK,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_TASK_CLOCK},
+    {.type = VIR_PERF_EVENT_PAGE_FAULTS,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_PAGE_FAULTS},
+    {.type = VIR_PERF_EVENT_CONTEXT_SWITCHES,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_CONTEXT_SWITCHES},
+    {.type = VIR_PERF_EVENT_CPU_MIGRATIONS,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_CPU_MIGRATIONS},
+    {.type = VIR_PERF_EVENT_PAGE_FAULTS_MIN,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_PAGE_FAULTS_MIN},
+    {.type = VIR_PERF_EVENT_PAGE_FAULTS_MAJ,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_PAGE_FAULTS_MAJ},
+    {.type = VIR_PERF_EVENT_ALIGNMENT_FAULTS,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_ALIGNMENT_FAULTS},
+    {.type = VIR_PERF_EVENT_EMULATION_FAULTS,
+     .attrType = PERF_TYPE_SOFTWARE,
+     .attrConfig = PERF_COUNT_SW_EMULATION_FAULTS},
 };
 typedef struct virPerfEventAttr *virPerfEventAttrPtr;
 
@@ -197,6 +228,9 @@ virPerfEventEnable(virPerfPtr perf,
 
     if (!event || !event_attr)
         return -1;
+
+    if (event->enabled)
+        return 0;
 
     if (event_attr->attrType == 0 && (type == VIR_PERF_EVENT_CMT ||
                                        type == VIR_PERF_EVENT_MBMT ||

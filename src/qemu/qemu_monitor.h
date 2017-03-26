@@ -246,9 +246,10 @@ char *qemuMonitorUnescapeArg(const char *in);
 qemuMonitorPtr qemuMonitorOpen(virDomainObjPtr vm,
                                virDomainChrSourceDefPtr config,
                                bool json,
+                               unsigned long long timeout,
                                qemuMonitorCallbacksPtr cb,
                                void *opaque)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4);
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(5);
 qemuMonitorPtr qemuMonitorOpenFD(virDomainObjPtr vm,
                                  int sockfd,
                                  bool json,
@@ -921,6 +922,53 @@ int qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
                                  qemuMonitorCPUDefInfoPtr **cpus);
 void qemuMonitorCPUDefInfoFree(qemuMonitorCPUDefInfoPtr cpu);
 
+typedef enum {
+    QEMU_MONITOR_CPU_PROPERTY_BOOLEAN,
+    QEMU_MONITOR_CPU_PROPERTY_STRING,
+    QEMU_MONITOR_CPU_PROPERTY_NUMBER,
+
+    QEMU_MONITOR_CPU_PROPERTY_LAST
+} qemuMonitorCPUPropertyType;
+
+VIR_ENUM_DECL(qemuMonitorCPUProperty)
+
+typedef struct _qemuMonitorCPUProperty qemuMonitorCPUProperty;
+typedef qemuMonitorCPUProperty *qemuMonitorCPUPropertyPtr;
+struct _qemuMonitorCPUProperty {
+    char *name;
+    qemuMonitorCPUPropertyType type;
+    union {
+        bool boolean;
+        char *string;
+        long long number;
+    } value;
+};
+
+typedef struct _qemuMonitorCPUModelInfo qemuMonitorCPUModelInfo;
+typedef qemuMonitorCPUModelInfo *qemuMonitorCPUModelInfoPtr;
+
+struct _qemuMonitorCPUModelInfo {
+    char *name;
+    size_t nprops;
+    qemuMonitorCPUPropertyPtr props;
+};
+
+typedef enum {
+    QEMU_MONITOR_CPU_MODEL_EXPANSION_STATIC,
+    QEMU_MONITOR_CPU_MODEL_EXPANSION_STATIC_FULL,
+    QEMU_MONITOR_CPU_MODEL_EXPANSION_FULL,
+} qemuMonitorCPUModelExpansionType;
+
+int qemuMonitorGetCPUModelExpansion(qemuMonitorPtr mon,
+                                    qemuMonitorCPUModelExpansionType type,
+                                    const char *model_name,
+                                    qemuMonitorCPUModelInfoPtr *model_info);
+
+void qemuMonitorCPUModelInfoFree(qemuMonitorCPUModelInfoPtr model_info);
+
+qemuMonitorCPUModelInfoPtr
+qemuMonitorCPUModelInfoCopy(const qemuMonitorCPUModelInfo *orig);
+
 int qemuMonitorGetCommands(qemuMonitorPtr mon,
                            char ***commands);
 int qemuMonitorGetEvents(qemuMonitorPtr mon,
@@ -973,7 +1021,8 @@ void qemuMonitorSetDomainLog(qemuMonitorPtr mon,
 
 int qemuMonitorGetGuestCPU(qemuMonitorPtr mon,
                            virArch arch,
-                           virCPUDataPtr *data);
+                           virCPUDataPtr *data,
+                           virCPUDataPtr *disabled);
 
 int qemuMonitorRTCResetReinjection(qemuMonitorPtr mon);
 

@@ -13,8 +13,19 @@ of bhyve are supported.
 
 In order to enable bhyve on your FreeBSD host, you'll need to load the <code>vmm</code>
 kernel module. Additionally, <code>if_tap</code> and <code>if_bridge</code> modules
-should be loaded for networking support.
+should be loaded for networking support. Also, <span class="since">since 3.2.0</span> the
+<code>virt-host-validate(1)</code> supports the bhyve host validation and could be
+used like this:
 </p>
+
+<pre>
+$ virt-host-validate bhyve
+ BHYVE: Checking for vmm module                                              : PASS
+ BHYVE: Checking for if_tap module                                           : PASS
+ BHYVE: Checking for if_bridge module                                        : PASS
+ BHYVE: Checking for nmdm module                                             : PASS
+$
+</pre>
 
 <p>
 Additional information on bhyve could be obtained on <a href="http://bhyve.org/">bhyve.org</a>.
@@ -276,6 +287,21 @@ you'll need to explicitly specify 'localtime' in this case:</p>
     &lt;clock offset='localtime'/&gt;
     ...
 &lt;/domain&gt;
+</pre>
+
+<h3><a name="e1000">e1000 NIC</a></h3>
+
+<p>As of <a href="https://svnweb.freebsd.org/changeset/base/302504">r302504</a> bhyve
+supports Intel e1000 network adapter emulation. It's supported in libvirt
+<span class="since">since 3.1.0</span> and could be used as follows:</p>
+
+<pre>
+...
+    &lt;interface type='bridge'&gt;
+      &lt;source bridge='virbr0'/&gt;
+      &lt;model type='<b>e1000</b>'/&gt;
+    &lt;/interface&gt;
+...
 </pre>
 
   </body>

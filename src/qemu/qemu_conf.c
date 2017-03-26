@@ -38,6 +38,7 @@
 #include "qemu_conf.h"
 #include "qemu_capabilities.h"
 #include "qemu_domain.h"
+#include "qemu_security.h"
 #include "viruuid.h"
 #include "virbuffer.h"
 #include "virconf.h"
@@ -186,6 +187,8 @@ virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged)
             goto error;
         if (virAsprintf(&cfg->nvramDir, "%s/nvram", cfg->libDir) < 0)
             goto error;
+        if (virAsprintf(&cfg->memoryBackingDir, "%s/ram", cfg->libDir) < 0)
+            goto error;
     } else {
         char *rundir;
         char *cachedir;
@@ -230,6 +233,8 @@ virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged)
             goto error;
         if (virAsprintf(&cfg->nvramDir,
                         "%s/qemu/nvram", cfg->configBaseDir) < 0)
+            goto error;
+        if (virAsprintf(&cfg->memoryBackingDir, "%s/qemu/ram", cfg->configBaseDir) < 0)
             goto error;
     }
 
@@ -317,7 +322,9 @@ virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged)
     if (!(cfg->namespaces = virBitmapNew(QEMU_DOMAIN_NS_LAST)))
         goto error;
 
-    if (virBitmapSetBit(cfg->namespaces, QEMU_DOMAIN_NS_MOUNT) < 0)
+    if (privileged &&
+        qemuDomainNamespaceAvailable(QEMU_DOMAIN_NS_MOUNT) &&
+        virBitmapSetBit(cfg->namespaces, QEMU_DOMAIN_NS_MOUNT) < 0)
         goto error;
 
 #ifdef DEFAULT_LOADER_NVRAM
@@ -404,6 +411,8 @@ static void virQEMUDriverConfigDispose(void *obj)
     VIR_FREE(cfg->lockManagerName);
 
     virFirmwareFreeList(cfg->firmwares, cfg->nfirmwares);
+
+    VIR_FREE(cfg->memoryBackingDir);
 }
 
 
@@ -428,7 +437,8 @@ virQEMUDriverConfigHugeTLBFSInit(virHugeTLBFSPtr hugetlbfs,
 
 
 int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
-                                const char *filename)
+                                const char *filename,
+                                bool privileged)
 {
     virConfPtr conf = NULL;
     int ret = -1;
@@ -822,6 +832,19 @@ int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
                 goto cleanup;
             }
 
+            if (!privileged) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("cannot use namespaces in session mode"));
+                goto cleanup;
+            }
+
+            if (!qemuDomainNamespaceAvailable(ns)) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                               _("%s namespace is not available"),
+                               namespaces[i]);
+                goto cleanup;
+            }
+
             if (virBitmapSetBit(cfg->namespaces, ns) < 0) {
                 virReportError(VIR_ERR_INTERNAL_ERROR,
                                _("Unable to enable namespace: %s"),
@@ -830,6 +853,9 @@ int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
             }
         }
     }
+
+    if (virConfGetValueString(conf, "memory_backing_dir", &cfg->memoryBackingDir) < 0)
+        goto cleanup;
 
     ret = 0;
 
@@ -891,7 +917,7 @@ virCapsPtr virQEMUDriverCreateCapabilities(virQEMUDriverPtr driver)
     }
 
     /* access sec drivers and create a sec model for each one */
-    if (!(sec_managers = virSecurityManagerGetNested(driver->securityManager)))
+    if (!(sec_managers = qemuSecurityGetNested(driver->securityManager)))
         goto error;
 
     /* calculate length */
@@ -904,14 +930,14 @@ virCapsPtr virQEMUDriverCreateCapabilities(virQEMUDriverPtr driver)
 
     for (i = 0; sec_managers[i]; i++) {
         virCapsHostSecModelPtr sm = &caps->host.secModels[i];
-        doi = virSecurityManagerGetDOI(sec_managers[i]);
-        model = virSecurityManagerGetModel(sec_managers[i]);
+        doi = qemuSecurityGetDOI(sec_managers[i]);
+        model = qemuSecurityGetModel(sec_managers[i]);
         if (VIR_STRDUP(sm->model, model) < 0 ||
             VIR_STRDUP(sm->doi, doi) < 0)
             goto error;
 
         for (j = 0; j < ARRAY_CARDINALITY(virtTypes); j++) {
-            lbl = virSecurityManagerGetBaseLabel(sec_managers[i], virtTypes[j]);
+            lbl = qemuSecurityGetBaseLabel(sec_managers[i], virtTypes[j]);
             type = virDomainVirtTypeToString(virtTypes[j]);
             if (lbl &&
                 virCapabilitiesHostSecModelAddBaseLabel(sm, type, lbl) < 0)

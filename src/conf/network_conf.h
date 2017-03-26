@@ -127,10 +127,12 @@ struct _virNetworkDNSHostDef {
 };
 
 
-typedef struct _virNetworkDNSForwarder {
+typedef struct _virNetworkDNSForwarder virNetworkDNSForwarder;
+typedef virNetworkDNSForwarder *virNetworkDNSForwarderPtr;
+struct _virNetworkDNSForwarder {
     virSocketAddr addr;
     char *domain;
-} virNetworkDNSForwarder, *virNetworkDNSForwarderPtr;
+};
 
 typedef struct _virNetworkDNSDef virNetworkDNSDef;
 typedef virNetworkDNSDef *virNetworkDNSDefPtr;
@@ -240,6 +242,7 @@ struct _virNetworkDef {
     int domainLocalOnly; /* enum virTristateBool: yes disables dns forwarding */
     unsigned long delay;   /* Bridge forward delay (ms) */
     bool stp; /* Spanning tree protocol */
+    unsigned int mtu; /* MTU for bridge, 0 means "default" i.e. unset in config */
     virMacAddr mac; /* mac address of bridge device */
     bool mac_specified;
 

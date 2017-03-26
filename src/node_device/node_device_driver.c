@@ -39,7 +39,7 @@
 #include "node_device_driver.h"
 #include "node_device_hal.h"
 #include "node_device_linux_sysfs.h"
-#include "virutil.h"
+#include "virvhba.h"
 #include "viraccessapicheck.h"
 #include "virnetdev.h"
 
@@ -54,7 +54,7 @@ static int update_caps(virNodeDeviceObjPtr dev)
     while (cap) {
         switch (cap->data.type) {
         case VIR_NODE_DEV_CAP_SCSI_HOST:
-            nodeDeviceSysfsGetSCSIHostCaps(&dev->def->caps->data);
+            nodeDeviceSysfsGetSCSIHostCaps(&dev->def->caps->data.scsi_host);
             break;
         case VIR_NODE_DEV_CAP_NET:
             if (virNetDevGetLinkInfo(cap->data.net.ifname, &cap->data.net.lnk) < 0)
@@ -65,13 +65,14 @@ static int update_caps(virNodeDeviceObjPtr dev)
             break;
         case VIR_NODE_DEV_CAP_PCI_DEV:
            if (nodeDeviceSysfsGetPCIRelatedDevCaps(dev->def->sysfs_path,
-                                                   &dev->def->caps->data) < 0)
+                                                   &dev->def->caps->data.pci_dev) < 0)
               return -1;
            break;
 
         /* all types that (supposedly) don't require any updates
          * relative to what's in the cache.
          */
+        case VIR_NODE_DEV_CAP_DRM:
         case VIR_NODE_DEV_CAP_SYSTEM:
         case VIR_NODE_DEV_CAP_USB_DEV:
         case VIR_NODE_DEV_CAP_USB_INTERFACE:
@@ -172,7 +173,7 @@ nodeNumOfDevices(virConnectPtr conn,
         virNodeDeviceObjLock(obj);
         if (virNodeNumOfDevicesCheckACL(conn, obj->def) &&
             ((cap == NULL) ||
-             virNodeDeviceHasCap(obj, cap)))
+             virNodeDeviceObjHasCap(obj, cap)))
             ++ndevs;
         virNodeDeviceObjUnlock(obj);
     }
@@ -201,7 +202,7 @@ nodeListDevices(virConnectPtr conn,
         virNodeDeviceObjLock(obj);
         if (virNodeListDevicesCheckACL(conn, obj->def) &&
             (cap == NULL ||
-             virNodeDeviceHasCap(obj, cap))) {
+             virNodeDeviceObjHasCap(obj, cap))) {
             if (VIR_STRDUP(names[ndevs++], obj->def->name) < 0) {
                 virNodeDeviceObjUnlock(obj);
                 goto failure;
@@ -248,7 +249,7 @@ nodeDeviceLookupByName(virConnectPtr conn, const char *name)
     virNodeDevicePtr ret = NULL;
 
     nodeDeviceLock();
-    obj = virNodeDeviceFindByName(&driver->devs, name);
+    obj = virNodeDeviceObjFindByName(&driver->devs, name);
     nodeDeviceUnlock();
 
     if (!obj) {
@@ -261,7 +262,10 @@ nodeDeviceLookupByName(virConnectPtr conn, const char *name)
     if (virNodeDeviceLookupByNameEnsureACL(conn, obj->def) < 0)
         goto cleanup;
 
-    ret = virGetNodeDevice(conn, name);
+    if ((ret = virGetNodeDevice(conn, name))) {
+        if (VIR_STRDUP(ret->parent, obj->def->parent) < 0)
+            virObjectUnref(ret);
+    }
 
  cleanup:
     if (obj)
@@ -293,7 +297,7 @@ nodeDeviceLookupSCSIHostByWWN(virConnectPtr conn,
 
         while (cap) {
             if (cap->data.type == VIR_NODE_DEV_CAP_SCSI_HOST) {
-                nodeDeviceSysfsGetSCSIHostCaps(&cap->data);
+                nodeDeviceSysfsGetSCSIHostCaps(&cap->data.scsi_host);
                 if (cap->data.scsi_host.flags &
                     VIR_NODE_DEV_CAP_FLAG_HBA_FC_HOST) {
                     if (STREQ(cap->data.scsi_host.wwnn, wwnn) &&
@@ -302,7 +306,10 @@ nodeDeviceLookupSCSIHostByWWN(virConnectPtr conn,
                         if (virNodeDeviceLookupSCSIHostByWWNEnsureACL(conn, obj->def) < 0)
                             goto out;
 
-                        dev = virGetNodeDevice(conn, obj->def->name);
+                        if ((dev = virGetNodeDevice(conn, obj->def->name))) {
+                            if (VIR_STRDUP(dev->parent, obj->def->parent) < 0)
+                                virObjectUnref(dev);
+                        }
                         virNodeDeviceObjUnlock(obj);
                         goto out;
                     }
@@ -330,7 +337,7 @@ nodeDeviceGetXMLDesc(virNodeDevicePtr dev,
     virCheckFlags(0, NULL);
 
     nodeDeviceLock();
-    obj = virNodeDeviceFindByName(&driver->devs, dev->name);
+    obj = virNodeDeviceObjFindByName(&driver->devs, dev->name);
     nodeDeviceUnlock();
 
     if (!obj) {
@@ -363,7 +370,7 @@ nodeDeviceGetParent(virNodeDevicePtr dev)
     char *ret = NULL;
 
     nodeDeviceLock();
-    obj = virNodeDeviceFindByName(&driver->devs, dev->name);
+    obj = virNodeDeviceObjFindByName(&driver->devs, dev->name);
     nodeDeviceUnlock();
 
     if (!obj) {
@@ -400,7 +407,7 @@ nodeDeviceNumOfCaps(virNodeDevicePtr dev)
     int ret = -1;
 
     nodeDeviceLock();
-    obj = virNodeDeviceFindByName(&driver->devs, dev->name);
+    obj = virNodeDeviceObjFindByName(&driver->devs, dev->name);
     nodeDeviceUnlock();
 
     if (!obj) {
@@ -445,7 +452,7 @@ nodeDeviceListCaps(virNodeDevicePtr dev, char **const names, int maxnames)
     int ret = -1;
 
     nodeDeviceLock();
-    obj = virNodeDeviceFindByName(&driver->devs, dev->name);
+    obj = virNodeDeviceObjFindByName(&driver->devs, dev->name);
     nodeDeviceUnlock();
 
     if (!obj) {
@@ -541,7 +548,7 @@ find_new_device(virConnectPtr conn, const char *wwnn, const char *wwpn)
 
     while ((now - start) < LINUX_NEW_DEVICE_WAIT_TIME) {
 
-        virFileWaitForDevices();
+        virWaitForDevices();
 
         dev = nodeDeviceLookupSCSIHostByWWN(conn, wwnn, wwpn, 0);
 
@@ -574,8 +581,7 @@ nodeDeviceCreateXML(virConnectPtr conn,
 
     nodeDeviceLock();
 
-    def = virNodeDeviceDefParseString(xmlDesc, CREATE_DEVICE, virt_type);
-    if (def == NULL)
+    if (!(def = virNodeDeviceDefParseString(xmlDesc, CREATE_DEVICE, virt_type)))
         goto cleanup;
 
     if (virNodeDeviceCreateXMLEnsureACL(conn, def) < 0)
@@ -584,19 +590,12 @@ nodeDeviceCreateXML(virConnectPtr conn,
     if (virNodeDeviceGetWWNs(def, &wwnn, &wwpn) == -1)
         goto cleanup;
 
-    if (virNodeDeviceGetParentHost(&driver->devs,
-                                   def->name,
-                                   def->parent,
-                                   &parent_host) == -1) {
+    if ((parent_host = virNodeDeviceObjGetParentHost(&driver->devs, def,
+                                                     CREATE_DEVICE)) < 0)
         goto cleanup;
-    }
 
-    if (virManageVport(parent_host,
-                       wwpn,
-                       wwnn,
-                       VPORT_CREATE) == -1) {
+    if (virVHBAManageVport(parent_host, wwpn, wwnn, VPORT_CREATE) < 0)
         goto cleanup;
-    }
 
     dev = find_new_device(conn, wwnn, wwpn);
     /* We don't check the return value, because one way or another,
@@ -621,58 +620,44 @@ nodeDeviceDestroy(virNodeDevicePtr dev)
 {
     int ret = -1;
     virNodeDeviceObjPtr obj = NULL;
-    char *parent_name = NULL, *wwnn = NULL, *wwpn = NULL;
+    virNodeDeviceDefPtr def;
+    char *wwnn = NULL, *wwpn = NULL;
     int parent_host = -1;
 
     nodeDeviceLock();
-    obj = virNodeDeviceFindByName(&driver->devs, dev->name);
-    nodeDeviceUnlock();
-
-    if (!obj) {
+    if (!(obj = virNodeDeviceObjFindByName(&driver->devs, dev->name))) {
         virReportError(VIR_ERR_NO_NODE_DEVICE,
                        _("no node device with matching name '%s'"),
                        dev->name);
-        goto out;
+        goto cleanup;
     }
 
     if (virNodeDeviceDestroyEnsureACL(dev->conn, obj->def) < 0)
-        goto out;
+        goto cleanup;
 
-    if (virNodeDeviceGetWWNs(obj->def, &wwnn, &wwpn) == -1)
-        goto out;
+    if (virNodeDeviceGetWWNs(obj->def, &wwnn, &wwpn) < 0)
+        goto cleanup;
 
-
-    /* virNodeDeviceGetParentHost will cause the device object's lock to be
-     * taken, so we have to dup the parent's name and drop the lock
-     * before calling it.  We don't need the reference to the object
-     * any more once we have the parent's name.  */
-    if (VIR_STRDUP(parent_name, obj->def->parent) < 0) {
-        virNodeDeviceObjUnlock(obj);
-        obj = NULL;
-        goto out;
-    }
+    /* virNodeDeviceGetParentHost will cause the device object's lock
+     * to be taken, so grab the object def which will have the various
+     * fields used to search (name, parent, parent_wwnn, parent_wwpn,
+     * or parent_fabric_wwn) and drop the object lock. */
+    def = obj->def;
     virNodeDeviceObjUnlock(obj);
     obj = NULL;
+    if ((parent_host = virNodeDeviceObjGetParentHost(&driver->devs, def,
+                                                     EXISTING_DEVICE)) < 0)
+        goto cleanup;
 
-    if (virNodeDeviceGetParentHost(&driver->devs,
-                                   dev->name,
-                                   parent_name,
-                                   &parent_host) == -1) {
-        goto out;
-    }
-
-    if (virManageVport(parent_host,
-                       wwpn,
-                       wwnn,
-                       VPORT_DELETE) == -1) {
-        goto out;
-    }
+    if (virVHBAManageVport(parent_host, wwpn, wwnn, VPORT_DELETE) < 0)
+        goto cleanup;
 
     ret = 0;
- out:
+
+ cleanup:
+    nodeDeviceUnlock();
     if (obj)
         virNodeDeviceObjUnlock(obj);
-    VIR_FREE(parent_name);
     VIR_FREE(wwnn);
     VIR_FREE(wwpn);
     return ret;

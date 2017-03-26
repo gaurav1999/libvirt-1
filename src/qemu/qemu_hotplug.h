@@ -33,6 +33,30 @@ int qemuDomainChangeEjectableMedia(virQEMUDriverPtr driver,
                                    virDomainDiskDefPtr disk,
                                    virStorageSourcePtr newsrc,
                                    bool force);
+
+void qemuDomainDelTLSObjects(virQEMUDriverPtr driver,
+                             virDomainObjPtr vm,
+                             const char *secAlias,
+                             const char *tlsAlias);
+
+int qemuDomainAddTLSObjects(virQEMUDriverPtr driver,
+                            virDomainObjPtr vm,
+                            const char *secAlias,
+                            virJSONValuePtr *secProps,
+                            const char *tlsAlias,
+                            virJSONValuePtr *tlsProps);
+
+int qemuDomainGetTLSObjects(virQEMUCapsPtr qemuCaps,
+                            qemuDomainSecretInfoPtr secinfo,
+                            const char *tlsCertdir,
+                            bool tlsListen,
+                            bool tlsVerify,
+                            const char *srcAlias,
+                            virJSONValuePtr *tlsProps,
+                            char **tlsAlias,
+                            virJSONValuePtr *secProps,
+                            char **secAlias);
+
 int qemuDomainAttachControllerDevice(virQEMUDriverPtr driver,
                                      virDomainObjPtr vm,
                                      virDomainControllerDefPtr controller);
@@ -135,5 +159,19 @@ int qemuDomainRemoveDevice(virQEMUDriverPtr driver,
 bool qemuDomainSignalDeviceRemoval(virDomainObjPtr vm,
                                    const char *devAlias,
                                    qemuDomainUnpluggingDeviceStatus status);
+
+int qemuDomainSetVcpusInternal(virQEMUDriverPtr driver,
+                               virDomainObjPtr vm,
+                               virDomainDefPtr def,
+                               virDomainDefPtr persistentDef,
+                               unsigned int nvcpus,
+                               bool hotpluggable);
+
+int qemuDomainSetVcpuInternal(virQEMUDriverPtr driver,
+                              virDomainObjPtr vm,
+                              virDomainDefPtr def,
+                              virDomainDefPtr persistentDef,
+                              virBitmapPtr vcpus,
+                              bool state);
 
 #endif /* __QEMU_HOTPLUG_H__ */

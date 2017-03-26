@@ -31,75 +31,32 @@
 
 VIR_LOG_INIT("qemu.qemu_process");
 
-struct qemuSecuritySetRestoreAllLabelData {
-    bool set;
-    virQEMUDriverPtr driver;
-    virDomainObjPtr vm;
-    const char *stdin_path;
-    bool migrated;
-};
-
-
-static int
-qemuSecuritySetRestoreAllLabelHelper(pid_t pid,
-                                     void *opaque)
-{
-    struct qemuSecuritySetRestoreAllLabelData *data = opaque;
-
-    virSecurityManagerPostFork(data->driver->securityManager);
-
-    if (data->set) {
-        VIR_DEBUG("Setting up security labels inside namespace pid=%lld",
-                  (long long) pid);
-        if (virSecurityManagerSetAllLabel(data->driver->securityManager,
-                                          data->vm->def,
-                                          data->stdin_path) < 0)
-            return -1;
-    } else {
-        VIR_DEBUG("Restoring security labels inside namespace pid=%lld",
-                  (long long) pid);
-        if (virSecurityManagerRestoreAllLabel(data->driver->securityManager,
-                                              data->vm->def,
-                                              data->migrated) < 0)
-            return -1;
-    }
-
-    return 0;
-}
-
 
 int
 qemuSecuritySetAllLabel(virQEMUDriverPtr driver,
                         virDomainObjPtr vm,
                         const char *stdin_path)
 {
-    struct qemuSecuritySetRestoreAllLabelData data;
+    int ret = -1;
 
-    memset(&data, 0, sizeof(data));
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
 
-    data.set = true;
-    data.driver = driver;
-    data.vm = vm;
-    data.stdin_path = stdin_path;
+    if (virSecurityManagerSetAllLabel(driver->securityManager,
+                                      vm->def,
+                                      stdin_path) < 0)
+        goto cleanup;
 
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
-        if (virSecurityManagerPreFork(driver->securityManager) < 0)
-            return -1;
-        if (virProcessRunInMountNamespace(vm->pid,
-                                          qemuSecuritySetRestoreAllLabelHelper,
-                                          &data) < 0) {
-            virSecurityManagerPostFork(driver->securityManager);
-            return -1;
-        }
-        virSecurityManagerPostFork(driver->securityManager);
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
 
-    } else {
-        if (virSecurityManagerSetAllLabel(driver->securityManager,
-                                          vm->def,
-                                          stdin_path) < 0)
-            return -1;
-    }
-    return 0;
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
 }
 
 
@@ -108,27 +65,15 @@ qemuSecurityRestoreAllLabel(virQEMUDriverPtr driver,
                             virDomainObjPtr vm,
                             bool migrated)
 {
-    struct qemuSecuritySetRestoreAllLabelData data;
-
-    memset(&data, 0, sizeof(data));
-
-    data.driver = driver;
-    data.vm = vm;
-    data.migrated = migrated;
-
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
-        if (virSecurityManagerPreFork(driver->securityManager) < 0)
-            return;
-
-        virProcessRunInMountNamespace(vm->pid,
-                                      qemuSecuritySetRestoreAllLabelHelper,
-                                      &data);
-        virSecurityManagerPostFork(driver->securityManager);
-    } else {
-        virSecurityManagerRestoreAllLabel(driver->securityManager,
-                                          vm->def,
-                                          migrated);
-    }
+    /* In contrast to qemuSecuritySetAllLabel, do not use
+     * secdriver transactions here. This function is called from
+     * qemuProcessStop() which is meant to do cleanup after qemu
+     * process died. If it did do, the namespace is gone as qemu
+     * was the only process running there. We would not succeed
+     * in entering the namespace then. */
+    virSecurityManagerRestoreAllLabel(driver->securityManager,
+                                      vm->def,
+                                      migrated);
 }
 
 
@@ -137,14 +82,26 @@ qemuSecuritySetDiskLabel(virQEMUDriverPtr driver,
                          virDomainObjPtr vm,
                          virDomainDiskDefPtr disk)
 {
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
-        /* Already handled by namespace code. */
-        return 0;
-    }
+    int ret = -1;
 
-    return virSecurityManagerSetDiskLabel(driver->securityManager,
-                                          vm->def,
-                                          disk);
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerSetDiskLabel(driver->securityManager,
+                                       vm->def,
+                                       disk) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
 }
 
 
@@ -153,14 +110,82 @@ qemuSecurityRestoreDiskLabel(virQEMUDriverPtr driver,
                              virDomainObjPtr vm,
                              virDomainDiskDefPtr disk)
 {
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
-        /* Already handled by namespace code. */
-        return 0;
-    }
+    int ret = -1;
 
-    return virSecurityManagerRestoreDiskLabel(driver->securityManager,
-                                              vm->def,
-                                              disk);
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerRestoreDiskLabel(driver->securityManager,
+                                           vm->def,
+                                           disk) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
+}
+
+
+int
+qemuSecuritySetImageLabel(virQEMUDriverPtr driver,
+                          virDomainObjPtr vm,
+                          virStorageSourcePtr src)
+{
+    int ret = -1;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerSetImageLabel(driver->securityManager,
+                                        vm->def,
+                                        src) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
+}
+
+
+int
+qemuSecurityRestoreImageLabel(virQEMUDriverPtr driver,
+                              virDomainObjPtr vm,
+                              virStorageSourcePtr src)
+{
+    int ret = -1;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerRestoreImageLabel(driver->securityManager,
+                                            vm->def,
+                                            src) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
 }
 
 
@@ -169,15 +194,27 @@ qemuSecuritySetHostdevLabel(virQEMUDriverPtr driver,
                             virDomainObjPtr vm,
                             virDomainHostdevDefPtr hostdev)
 {
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
-        /* Already handled by namespace code. */
-        return 0;
-    }
+    int ret = -1;
 
-    return virSecurityManagerSetHostdevLabel(driver->securityManager,
-                                             vm->def,
-                                             hostdev,
-                                             NULL);
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerSetHostdevLabel(driver->securityManager,
+                                          vm->def,
+                                          hostdev,
+                                          NULL) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
 }
 
 
@@ -186,13 +223,81 @@ qemuSecurityRestoreHostdevLabel(virQEMUDriverPtr driver,
                                 virDomainObjPtr vm,
                                 virDomainHostdevDefPtr hostdev)
 {
-    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
-        /* Already handled by namespace code. */
-        return 0;
-    }
+    int ret = -1;
 
-    return virSecurityManagerRestoreHostdevLabel(driver->securityManager,
-                                                 vm->def,
-                                                 hostdev,
-                                                 NULL);
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerRestoreHostdevLabel(driver->securityManager,
+                                              vm->def,
+                                              hostdev,
+                                              NULL) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
+}
+
+
+int
+qemuSecuritySetMemoryLabel(virQEMUDriverPtr driver,
+                           virDomainObjPtr vm,
+                           virDomainMemoryDefPtr mem)
+{
+    int ret = -1;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerSetMemoryLabel(driver->securityManager,
+                                         vm->def,
+                                         mem) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
+}
+
+
+int
+qemuSecurityRestoreMemoryLabel(virQEMUDriverPtr driver,
+                               virDomainObjPtr vm,
+                               virDomainMemoryDefPtr mem)
+{
+    int ret = -1;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionStart(driver->securityManager) < 0)
+        goto cleanup;
+
+    if (virSecurityManagerRestoreMemoryLabel(driver->securityManager,
+                                             vm->def,
+                                             mem) < 0)
+        goto cleanup;
+
+    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT) &&
+        virSecurityManagerTransactionCommit(driver->securityManager,
+                                            vm->pid) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    virSecurityManagerTransactionAbort(driver->securityManager);
+    return ret;
 }

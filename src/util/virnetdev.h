@@ -86,10 +86,12 @@ typedef enum {
 
 VIR_ENUM_DECL(virNetDevIfState)
 
-typedef struct {
+typedef struct _virNetDevIfLink virNetDevIfLink;
+typedef virNetDevIfLink *virNetDevIfLinkPtr;
+struct _virNetDevIfLink {
     virNetDevIfState state; /* link state */
     unsigned int speed;      /* link speed in Mbits per second */
-} virNetDevIfLink, *virNetDevIfLinkPtr;
+};
 
 typedef enum {
     VIR_NET_DEV_FEAT_GRXCSUM,
@@ -155,6 +157,8 @@ int virNetDevSetNamespace(const char *ifname, pid_t pidInNs)
 int virNetDevSetName(const char *ifname, const char *newifname)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 
+char *virNetDevGetName(int ifindex)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
 int virNetDevGetIndex(const char *ifname, int *ifindex)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 

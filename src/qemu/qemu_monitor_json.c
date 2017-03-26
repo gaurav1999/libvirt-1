@@ -1394,7 +1394,8 @@ qemuMonitorJSONExtractCPUInfo(virJSONValuePtr data,
 int
 qemuMonitorJSONQueryCPUs(qemuMonitorPtr mon,
                          struct qemuMonitorQueryCpusEntry **entries,
-                         size_t *nentries)
+                         size_t *nentries,
+                         bool force)
 {
     int ret = -1;
     virJSONValuePtr cmd = qemuMonitorJSONMakeCommand("query-cpus", NULL);
@@ -1405,6 +1406,9 @@ qemuMonitorJSONQueryCPUs(qemuMonitorPtr mon,
         return -1;
 
     if (qemuMonitorJSONCommand(mon, cmd, &reply) < 0)
+        goto cleanup;
+
+    if (force && qemuMonitorJSONCheckError(cmd, reply) < 0)
         goto cleanup;
 
     if (!(data = virJSONValueObjectGetArray(reply, "return"))) {
@@ -4603,7 +4607,7 @@ int qemuMonitorJSONSetBlockIoThrottle(qemuMonitorPtr mon,
 
     if (supportGroupNameOption &&
         virJSONValueObjectAdd(args,
-                              "s:group", info->group_name,
+                              "S:group", info->group_name,
                               NULL) < 0)
         goto cleanup;
 
@@ -4970,6 +4974,175 @@ qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
     }
     virJSONValueFree(cmd);
     virJSONValueFree(reply);
+    return ret;
+}
+
+
+VIR_ENUM_IMPL(qemuMonitorCPUProperty,
+              QEMU_MONITOR_CPU_PROPERTY_LAST,
+              "boolean", "string", "number")
+
+static int
+qemuMonitorJSONParseCPUModelProperty(const char *key,
+                                     virJSONValue *value,
+                                     void *opaque)
+{
+    qemuMonitorCPUModelInfoPtr machine_model = opaque;
+    qemuMonitorCPUPropertyPtr prop;
+
+    prop = machine_model->props + machine_model->nprops;
+
+    switch ((virJSONType) value->type) {
+    case VIR_JSON_TYPE_STRING:
+        if (VIR_STRDUP(prop->value.string, virJSONValueGetString(value)) < 0)
+            return -1;
+        prop->type = QEMU_MONITOR_CPU_PROPERTY_STRING;
+        break;
+
+    case VIR_JSON_TYPE_NUMBER:
+        /* Ignore numbers which cannot be parsed as unsigned long long */
+        if (virJSONValueGetNumberLong(value, &prop->value.number) < 0)
+            return 0;
+        prop->type = QEMU_MONITOR_CPU_PROPERTY_NUMBER;
+        break;
+
+    case VIR_JSON_TYPE_BOOLEAN:
+        virJSONValueGetBoolean(value, &prop->value.boolean);
+        prop->type = QEMU_MONITOR_CPU_PROPERTY_BOOLEAN;
+        break;
+
+    case VIR_JSON_TYPE_OBJECT:
+    case VIR_JSON_TYPE_ARRAY:
+    case VIR_JSON_TYPE_NULL:
+        return 0;
+    }
+
+    machine_model->nprops++;
+    if (VIR_STRDUP(prop->name, key) < 0)
+        return -1;
+
+    return 0;
+}
+
+int
+qemuMonitorJSONGetCPUModelExpansion(qemuMonitorPtr mon,
+                                    qemuMonitorCPUModelExpansionType type,
+                                    const char *model_name,
+                                    qemuMonitorCPUModelInfoPtr *model_info)
+{
+    int ret = -1;
+    virJSONValuePtr model = NULL;
+    virJSONValuePtr cmd = NULL;
+    virJSONValuePtr reply = NULL;
+    virJSONValuePtr data;
+    virJSONValuePtr cpu_model;
+    virJSONValuePtr cpu_props;
+    qemuMonitorCPUModelInfoPtr machine_model = NULL;
+    char const *cpu_name;
+    const char *typeStr = "";
+
+    *model_info = NULL;
+
+    if (!(model = virJSONValueNewObject()))
+        goto cleanup;
+
+    if (virJSONValueObjectAppendString(model, "name", model_name) < 0)
+        goto cleanup;
+
+ retry:
+    switch (type) {
+    case QEMU_MONITOR_CPU_MODEL_EXPANSION_STATIC:
+    case QEMU_MONITOR_CPU_MODEL_EXPANSION_STATIC_FULL:
+        typeStr = "static";
+        break;
+
+    case QEMU_MONITOR_CPU_MODEL_EXPANSION_FULL:
+        typeStr = "full";
+        break;
+    }
+
+    if (!(cmd = qemuMonitorJSONMakeCommand("query-cpu-model-expansion",
+                                           "s:type", typeStr,
+                                           "a:model", model,
+                                           NULL)))
+        goto cleanup;
+
+    /* model will be freed when cmd is freed. we set model
+     * to NULL to avoid double freeing.
+     */
+    model = NULL;
+
+    if (qemuMonitorJSONCommand(mon, cmd, &reply) < 0)
+        goto cleanup;
+
+    /* Even though query-cpu-model-expansion is advertised by query-commands it
+     * may just return GenericError if it is not implemented for the requested
+     * guest architecture or it is not supported in the host environment.
+     */
+    if (qemuMonitorJSONHasError(reply, "GenericError")) {
+        ret = 0;
+        goto cleanup;
+    }
+
+    if (qemuMonitorJSONCheckError(cmd, reply) < 0)
+        goto cleanup;
+
+    data = virJSONValueObjectGetObject(reply, "return");
+
+    if (!(cpu_model = virJSONValueObjectGetObject(data, "model"))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("query-cpu-model-expansion reply data was missing 'model'"));
+        goto cleanup;
+    }
+
+    /* QEMU_MONITOR_CPU_MODEL_EXPANSION_STATIC_FULL requests "full" expansion
+     * on the result of the initial "static" expansion.
+     */
+    if (type == QEMU_MONITOR_CPU_MODEL_EXPANSION_STATIC_FULL) {
+        if (!(model = virJSONValueCopy(cpu_model)))
+            goto cleanup;
+
+        virJSONValueFree(cmd);
+        virJSONValueFree(reply);
+        type = QEMU_MONITOR_CPU_MODEL_EXPANSION_FULL;
+        goto retry;
+    }
+
+    if (!(cpu_name = virJSONValueObjectGetString(cpu_model, "name"))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("query-cpu-model-expansion reply data was missing 'name'"));
+        goto cleanup;
+    }
+
+    if (!(cpu_props = virJSONValueObjectGetObject(cpu_model, "props"))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("query-cpu-model-expansion reply data was missing 'props'"));
+        goto cleanup;
+    }
+
+    if (VIR_ALLOC(machine_model) < 0)
+        goto cleanup;
+
+    if (VIR_STRDUP(machine_model->name, cpu_name) < 0)
+        goto cleanup;
+
+    if (VIR_ALLOC_N(machine_model->props, cpu_props->data.object.npairs) < 0)
+        goto cleanup;
+
+    if (virJSONValueObjectForeachKeyValue(cpu_props,
+                                          qemuMonitorJSONParseCPUModelProperty,
+                                          machine_model) < 0)
+        goto cleanup;
+
+    ret = 0;
+    *model_info = machine_model;
+    machine_model = NULL;
+
+ cleanup:
+    qemuMonitorCPUModelInfoFree(machine_model);
+    virJSONValueFree(cmd);
+    virJSONValueFree(reply);
+    virJSONValueFree(model);
     return ret;
 }
 
@@ -6182,7 +6355,7 @@ qemuMonitorJSONAttachCharDevCommand(const char *chrID,
             virJSONValueObjectAppendBoolean(data, "server", chr->data.tcp.listen) < 0)
             goto error;
         if (chr->data.tcp.tlscreds) {
-            if (!(tlsalias = qemuAliasTLSObjFromChardevAlias(chrID)))
+            if (!(tlsalias = qemuAliasTLSObjFromSrcAlias(chrID)))
                 goto error;
 
             if (virJSONValueObjectAppendString(data, "tls-creds", tlsalias) < 0)
@@ -6423,37 +6596,35 @@ qemuMonitorJSONParseCPUx86FeatureWord(virJSONValuePtr data,
 }
 
 
-static int
-qemuMonitorJSONParseCPUx86Features(virJSONValuePtr data,
-                                   virCPUDataPtr *cpudata)
+static virCPUDataPtr
+qemuMonitorJSONParseCPUx86Features(virJSONValuePtr data)
 {
-    virCPUx86Data x86Data = VIR_CPU_X86_DATA_INIT;
+    virCPUDataPtr cpudata = NULL;
     virCPUx86CPUID cpuid;
     size_t i;
     ssize_t n;
-    int ret = -1;
 
-    if ((n = virJSONValueArraySize(data)) < 0) {
+    if (!data || (n = virJSONValueArraySize(data)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("invalid array of CPUID features"));
-        return -1;
+        goto error;
     }
+
+    if (!(cpudata = virCPUDataNew(VIR_ARCH_X86_64)))
+        goto error;
 
     for (i = 0; i < n; i++) {
         if (qemuMonitorJSONParseCPUx86FeatureWord(virJSONValueArrayGet(data, i),
                                                   &cpuid) < 0 ||
-            virCPUx86DataAddCPUID(&x86Data, &cpuid) < 0)
-            goto cleanup;
+            virCPUx86DataAddCPUID(cpudata, &cpuid) < 0)
+            goto error;
     }
 
-    if (!(*cpudata = virCPUx86MakeData(VIR_ARCH_X86_64, &x86Data)))
-        goto cleanup;
+    return cpudata;
 
-    ret = 0;
-
- cleanup:
-    virCPUx86DataClear(&x86Data);
-    return ret;
+ error:
+    virCPUDataFree(cpudata);
+    return NULL;
 }
 
 
@@ -6480,7 +6651,10 @@ qemuMonitorJSONGetCPUx86Data(qemuMonitorPtr mon,
         goto cleanup;
 
     data = virJSONValueObjectGetArray(reply, "return");
-    ret = qemuMonitorJSONParseCPUx86Features(data, cpudata);
+    if (!(*cpudata = qemuMonitorJSONParseCPUx86Features(data)))
+        goto cleanup;
+
+    ret = 0;
 
  cleanup:
     virJSONValueFree(cmd);
@@ -6523,9 +6697,8 @@ qemuMonitorJSONCheckCPUx86(qemuMonitorPtr mon)
     if (qemuMonitorJSONCheckError(cmd, reply))
         goto cleanup;
 
-    data = virJSONValueObjectGetArray(reply, "return");
-
-    if ((n = virJSONValueArraySize(data)) < 0) {
+    if (!(data = virJSONValueObjectGetArray(reply, "return")) ||
+        (n = virJSONValueArraySize(data)) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("qom-list reply data was not an array"));
         goto cleanup;
@@ -6555,6 +6728,7 @@ qemuMonitorJSONCheckCPUx86(qemuMonitorPtr mon)
  * @mon: Pointer to the monitor
  * @arch: arch of the guest
  * @data: returns the cpu data of the guest
+ * @disabled: returns the CPU data for features which were disabled by QEMU
  *
  * Retrieve the definition of the guest CPU from a running qemu instance.
  *
@@ -6564,26 +6738,43 @@ qemuMonitorJSONCheckCPUx86(qemuMonitorPtr mon)
 int
 qemuMonitorJSONGetGuestCPU(qemuMonitorPtr mon,
                            virArch arch,
-                           virCPUDataPtr *data)
+                           virCPUDataPtr *data,
+                           virCPUDataPtr *disabled)
 {
+    virCPUDataPtr cpuEnabled = NULL;
+    virCPUDataPtr cpuDisabled = NULL;
     int rc;
 
-    switch (arch) {
-    case VIR_ARCH_X86_64:
-    case VIR_ARCH_I686:
+    if (ARCH_IS_X86(arch)) {
         if ((rc = qemuMonitorJSONCheckCPUx86(mon)) < 0)
             return -1;
         else if (!rc)
             return -2;
 
-        return qemuMonitorJSONGetCPUx86Data(mon, "feature-words", data);
+        if (qemuMonitorJSONGetCPUx86Data(mon, "feature-words",
+                                         &cpuEnabled) < 0)
+            goto error;
 
-    default:
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("CPU definition retrieval isn't supported for '%s'"),
-                       virArchToString(arch));
-        return -1;
+        if (disabled &&
+            qemuMonitorJSONGetCPUx86Data(mon, "filtered-features",
+                                         &cpuDisabled) < 0)
+            goto error;
+
+        *data = cpuEnabled;
+        if (disabled)
+            *disabled = cpuDisabled;
+        return 0;
     }
+
+    virReportError(VIR_ERR_INTERNAL_ERROR,
+                   _("CPU definition retrieval isn't supported for '%s'"),
+                   virArchToString(arch));
+    return -1;
+
+ error:
+    virCPUDataFree(cpuEnabled);
+    virCPUDataFree(cpuDisabled);
+    return -1;
 }
 
 int
