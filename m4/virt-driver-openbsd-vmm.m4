@@ -1,6 +1,6 @@
 dnl The OpenBSD VMM driver
 dnl
-dnl Copyright (C) 2016 Sergey Bronnikov
+dnl Copyright (C) 2016-2017 Sergey Bronnikov
 dnl
 dnl This library is free software; you can redistribute it and/or
 dnl modify it under the terms of the GNU Lesser General Public
@@ -16,6 +16,10 @@ dnl You should have received a copy of the GNU Lesser General Public
 dnl License along with this library.  If not, see
 dnl <http://www.gnu.org/licenses/>.
 dnl
+
+AC_DEFUN([LIBVIRT_DRIVER_ARG_OPENBSD_VMM],[
+    LIBVIRT_ARG_WITH_FEATURE([VMM], [VMCTL], [check])
+])
 
 AC_DEFUN([LIBVIRT_DRIVER_CHECK_OPENBSD_VMM],[
     AC_ARG_WITH([openbsd_vmm],
@@ -49,5 +53,5 @@ AC_DEFUN([LIBVIRT_DRIVER_CHECK_OPENBSD_VMM],[
 ])
 
 AC_DEFUN([LIBVIRT_DRIVER_RESULT_OPENBSD_VMM],[
-    AC_MSG_NOTICE([OpenBSD VMM: $with_openbsd_vmm])
+    LIBVIRT_RESULT([OpenBSD VMM], [$with_openbsd_vmm])
 ])
