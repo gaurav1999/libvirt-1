@@ -50,7 +50,7 @@
 #include "virlog.h"
 #include "vircommand.h"
 #include "viruri.h"
-#include "virstats.h"
+//#include "virstats.h"
 #include "virstring.h"
 #include "openbsd_vmm_driver.h"
 
@@ -98,7 +98,8 @@ static void openbsdDriverUnlock(struct openbsd_driver *driver)
 static int openbsdSetInitialConfig(virDomainDefPtr vmdef)
 {
     int ret = -1;
-    int vpsid;
+    //int vpsid;
+    vmdef = 0;
     char * confdir = NULL;
     virCommandPtr cmd = NULL;
 
@@ -490,10 +491,10 @@ static int openbsdDomainReboot(virDomainPtr dom,
 */
 
 
-/*
 static virDomainPtr
 openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
 {
+    xml = NULL; // stub
     struct openbsd_driver *driver =  conn->privateData;
     virDomainDefPtr vmdef = NULL;
     virDomainObjPtr vm = NULL;
@@ -506,9 +507,9 @@ openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fl
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
     openbsdDriverLock(driver);
-    if ((vmdef = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
-                                         parse_flags)) == NULL)
-        goto cleanup;
+    //if ((vmdef = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
+    //                                     parse_flags)) == NULL)
+    //    goto cleanup;
 
     if (!(vm = virDomainObjListAdd(driver->domains, vmdef,
                                    driver->xmlopt,
@@ -522,6 +523,7 @@ openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fl
         goto cleanup;
     }
 
+/*
     if (vm->def->nfss == 1) {
         if (openbsdSetDiskQuota(vm->def, vm->def->fss[0], true) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -529,21 +531,17 @@ openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fl
             goto cleanup;
         }
     }
+*/
 
-    if (openbsdSetDefinedUUID(strtoI(vm->def->name), vm->def->uuid) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Could not set UUID"));
-        goto cleanup;
-    }
-
-    if (openbsdDomainSetNetworkConfig(conn, vm->def) < 0)
-        goto cleanup;
+    //if (openbsdDomainSetNetworkConfig(conn, vm->def) < 0)
+    //    goto cleanup;
 
     if (virDomainDefHasVcpusOffline(vm->def)) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("current vcpu count must equal maximum"));
         goto cleanup;
     }
+/*
     if (virDomainDefGetVcpusMax(vm->def)) {
         if (openbsdDomainSetVcpusInternal(vm, virDomainDefGetVcpusMax(vm->def)) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -551,7 +549,9 @@ openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fl
              goto cleanup;
         }
     }
+*/
 
+/*
     if (vm->def->mem.cur_balloon > 0) {
         if (openbsdDomainSetMemoryInternal(vm, vm->def->mem.cur_balloon) < 0) {
             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
@@ -559,6 +559,7 @@ openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fl
              goto cleanup;
         }
     }
+*/
 
     dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
     if (dom)
@@ -571,18 +572,21 @@ openbsdDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int fl
     openbsdDriverUnlock(driver);
     return dom;
 }
-*/
 
 static virDomainPtr
 openbsdDomainDefineXML(virConnectPtr conn, const char *xml)
 {
-    return openbsdDomainDefineXMLFlags(conn, xml, 0);
+    xml = NULL; // stub
+    conn = NULL; // stub
+    //return openbsdDomainDefineXMLFlags(conn, xml, 0);
+    return NULL;
 }
 
 static virDomainPtr
 openbsdDomainCreateXML(virConnectPtr conn, const char *xml,
                       unsigned int flags)
 {
+    xml = NULL; // stub
     struct openbsd_driver *driver =  conn->privateData;
     virDomainDefPtr vmdef = NULL;
     virDomainObjPtr vm = NULL;
@@ -596,9 +600,9 @@ openbsdDomainCreateXML(virConnectPtr conn, const char *xml,
         parse_flags |= VIR_DOMAIN_DEF_PARSE_VALIDATE_SCHEMA;
 
     openbsdDriverLock(driver);
-    if ((vmdef = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
-                                         parse_flags)) == NULL)
-        goto cleanup;
+    //if ((vmdef = virDomainDefParseString(xml, driver->caps, driver->xmlopt,
+    //                                    parse_flags)) == NULL)
+    //    goto cleanup;
 
     if (!(vm = virDomainObjListAdd(driver->domains,
                                    vmdef,
@@ -643,7 +647,7 @@ openbsdDomainCreateXML(virConnectPtr conn, const char *xml,
     //if (virRun(progstart, NULL) < 0)
     //    goto cleanup;
 
-    vm->pid = strtoI(vm->def->name);
+    //vm->pid = strtoI(vm->def->name);
     vm->def->id = vm->pid;
     virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, VIR_DOMAIN_RUNNING_BOOTED);
 
@@ -702,7 +706,7 @@ openbsdDomainCreateWithFlags(virDomainPtr dom, unsigned int flags)
     if (virRun(prog, NULL) < 0)
         goto cleanup;
 
-    vm->pid = strtoI(vm->def->name);
+    //vm->pid = strtoI(vm->def->name);
     vm->def->id = vm->pid;
     dom->id = vm->pid;
     virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, VIR_DOMAIN_RUNNING_BOOTED);
@@ -939,6 +943,8 @@ static int openbsdConnectListDefinedDomains(virConnectPtr conn ATTRIBUTE_UNUSED,
 
 static int openbsdGetProcessInfo(unsigned long long *cpuTime, int vpsid)
 {
+    vpsid = 0;
+    cpuTime = 0;
     return 0;
 }
 
@@ -995,7 +1001,7 @@ static int
 openbsdGetVEStatus(virDomainObjPtr vm, int *status, int *reason)
 {
     char *outbuf;
-    char *line;
+    //char *line;
     int state;
     int ret = -1;
 
@@ -1013,10 +1019,11 @@ openbsdGetVEStatus(virDomainObjPtr vm, int *status, int *reason)
     }
 
     ret = 0;
+    return ret; // stub
 
- cleanup:
-    VIR_FREE(outbuf);
-    return ret;
+ //cleanup:
+ //   VIR_FREE(outbuf);
+ //   return ret;
 }
 
 
@@ -1106,7 +1113,7 @@ static virHypervisorDriver openbsdHypervisorDriver = {
     .connectGetType = openbsdConnectGetType, /* implemented */
     .connectGetVersion = openbsdConnectGetVersion, /* implemented */
     .connectGetMaxVcpus = openbsdConnectGetMaxVcpus, /* implemented */
-    .nodeGetInfo = openbsdNodeGetInfo, /* implemented */
+    //.nodeGetInfo = openbsdNodeGetInfo, /* implemented */
     .nodeGetCPUStats = openbsdNodeGetCPUStats, /* implemented */
     .nodeGetMemoryStats = openbsdNodeGetMemoryStats, /* implemented */
     .nodeGetCellsFreeMemory = openbsdNodeGetCellsFreeMemory, /* implemented */
@@ -1116,7 +1123,7 @@ static virHypervisorDriver openbsdHypervisorDriver = {
     //.connectListDomains = openbsdConnectListDomains,
     .connectNumOfDomains = openbsdConnectNumOfDomains, /* implemented */
     .connectListAllDomains = openbsdConnectListAllDomains,
-    //.domainCreateXML = openbsdDomainCreateXML,
+    .domainCreateXML = openbsdDomainCreateXML,
     .domainLookupByID = openbsdDomainLookupByID, /* implemented */
     .domainLookupByUUID = openbsdDomainLookupByUUID, /* implemented */
     .domainLookupByName = openbsdDomainLookupByName, /* implemented */
@@ -1137,8 +1144,8 @@ static virHypervisorDriver openbsdHypervisorDriver = {
     .connectNumOfDefinedDomains = openbsdConnectNumOfDefinedDomains, /* implemented */
     //.domainCreate = openbsdDomainCreate,
     //.domainCreateWithFlags = openbsdDomainCreateWithFlags,
-    //.domainDefineXML = openbsdDomainDefineXML,
-    //.domainDefineXMLFlags = openbsdDomainDefineXMLFlags,
+    .domainDefineXML = openbsdDomainDefineXML,
+    .domainDefineXMLFlags = openbsdDomainDefineXMLFlags,
     //.domainUndefine = openbsdDomainUndefine,
     .connectIsEncrypted = openbsdConnectIsEncrypted, /* implemented */
     .connectIsSecure = openbsdConnectIsSecure, /* implemented */
