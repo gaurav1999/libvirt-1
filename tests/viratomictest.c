@@ -20,7 +20,7 @@
 #include <config.h>
 
 #include <time.h>
-#include <sched.h>
+//#include <sched.h>
 
 #include "testutils.h"
 
@@ -121,7 +121,7 @@ thread_func(void *data)
     for (i = 0; i < ROUNDS; i++) {
         d = virRandomBits(7);
         bucket[idx] += d;
-        virAtomicIntAdd(&atomic, d);
+        //virAtomicIntAdd(&atomic, d);
 #ifdef WIN32
         SleepEx(0, 0);
 #else
