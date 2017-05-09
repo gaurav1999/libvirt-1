@@ -17,9 +17,7 @@
  * License along with this library.  If not, see
  * <http://www.gnu.org/licenses/>.
  *
- * Authors:
- * Sergey Bronnikov <sergeyb@bronevichok.ru>
- *
+ * Author: Sergey Bronnikov <sergeyb@bronevichok.ru>
  */
 
 #include <config.h>
