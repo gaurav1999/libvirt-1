@@ -103,6 +103,24 @@ struct _virCPUFeatureDef {
 };
 
 
+typedef enum {
+    VIR_CPU_CACHE_MODE_EMULATE,
+    VIR_CPU_CACHE_MODE_PASSTHROUGH,
+    VIR_CPU_CACHE_MODE_DISABLE,
+
+    VIR_CPU_CACHE_MODE_LAST
+} virCPUCacheMode;
+
+VIR_ENUM_DECL(virCPUCacheMode);
+
+typedef struct _virCPUCacheDef virCPUCacheDef;
+typedef virCPUCacheDef *virCPUCacheDefPtr;
+struct _virCPUCacheDef {
+    int level;          /* -1 for unspecified */
+    virCPUCacheMode mode;
+};
+
+
 typedef struct _virCPUDef virCPUDef;
 typedef virCPUDef *virCPUDefPtr;
 struct _virCPUDef {
@@ -121,8 +139,12 @@ struct _virCPUDef {
     size_t nfeatures;
     size_t nfeatures_max;
     virCPUFeatureDefPtr features;
+    virCPUCacheDefPtr cache;
 };
 
+
+void ATTRIBUTE_NONNULL(1)
+virCPUDefFreeFeatures(virCPUDefPtr def);
 
 void ATTRIBUTE_NONNULL(1)
 virCPUDefFreeModel(virCPUDefPtr def);
@@ -160,14 +182,16 @@ virCPUDefCopy(const virCPUDef *cpu);
 virCPUDefPtr
 virCPUDefCopyWithoutModel(const virCPUDef *cpu);
 
-virCPUDefPtr
-virCPUDefParseXML(xmlNodePtr node,
-                  xmlXPathContextPtr ctxt,
-                  virCPUType mode);
+int
+virCPUDefParseXML(xmlXPathContextPtr ctxt,
+                  const char *xpath,
+                  virCPUType mode,
+                  virCPUDefPtr *cpu);
 
 bool
 virCPUDefIsEqual(virCPUDefPtr src,
-                 virCPUDefPtr dst);
+                 virCPUDefPtr dst,
+                 bool reportError);
 
 char *
 virCPUDefFormat(virCPUDefPtr def,

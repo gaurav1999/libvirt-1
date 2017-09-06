@@ -323,6 +323,7 @@ static int testMessageSingleArrayRef(const void *args ATTRIBUTE_UNUSED)
  cleanup:
     if (out_strv1)
         VIR_FREE(out_strv1[0]);
+    VIR_FREE(out_strv1);
     virDBusMessageUnref(msg);
     return ret;
 }
@@ -727,4 +728,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

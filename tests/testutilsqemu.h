@@ -1,6 +1,7 @@
 #ifdef WITH_QEMU
 
 # include "capabilities.h"
+# include "virfilecache.h"
 # include "domain_conf.h"
 # include "qemu/qemu_capabilities.h"
 # include "qemu/qemu_conf.h"
@@ -21,6 +22,7 @@ virQEMUCapsPtr qemuTestParseCapabilities(virCapsPtr caps,
 extern virCPUDefPtr cpuDefault;
 extern virCPUDefPtr cpuHaswell;
 extern virCPUDefPtr cpuPower8;
+extern virCPUDefPtr cpuPower9;
 
 void qemuTestSetHostArch(virCapsPtr caps,
                         virArch arch);
@@ -29,12 +31,9 @@ void qemuTestSetHostCPU(virCapsPtr caps,
 
 int qemuTestDriverInit(virQEMUDriver *driver);
 void qemuTestDriverFree(virQEMUDriver *driver);
-int qemuTestCapsCacheInsert(virQEMUCapsCachePtr cache, const char *binary,
+int qemuTestCapsCacheInsert(virFileCachePtr cache,
                             virQEMUCapsPtr caps);
 
 int testQemuCapsSetGIC(virQEMUCapsPtr qemuCaps,
                        int gic);
-
-/* This variable is actually defined in src/qemu/qemu_capabilities.c */
-extern const char *qemuTestCapsName;
 #endif

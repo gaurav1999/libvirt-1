@@ -650,31 +650,33 @@ virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
     for (i = 0; sec_managers[i]; i++) {
         generated = false;
         seclabel = virDomainDefGetSecurityLabelDef(vm, sec_managers[i]->drv->name);
-        if (!seclabel) {
-            if (!(seclabel = virSecurityLabelDefNew(sec_managers[i]->drv->name)))
-                goto cleanup;
-            generated = seclabel->implicit = true;
-        }
-
-        if (seclabel->type == VIR_DOMAIN_SECLABEL_DEFAULT) {
-            if (virSecurityManagerGetDefaultConfined(sec_managers[i])) {
-                seclabel->type = VIR_DOMAIN_SECLABEL_DYNAMIC;
-            } else {
-                seclabel->type = VIR_DOMAIN_SECLABEL_NONE;
-                seclabel->relabel = false;
-            }
-        }
-
-        if (seclabel->type == VIR_DOMAIN_SECLABEL_NONE) {
-            if (virSecurityManagerGetRequireConfined(sec_managers[i])) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                               _("Unconfined guests are not allowed on this host"));
-                goto cleanup;
-            } else if (vm->nseclabels && generated) {
-                VIR_DEBUG("Skipping auto generated seclabel of type none");
-                virSecurityLabelDefFree(seclabel);
-                seclabel = NULL;
+        if (seclabel == NULL) {
+            /* Only generate seclabel if confinement is enabled */
+            if (!virSecurityManagerGetDefaultConfined(sec_managers[i])) {
+                VIR_DEBUG("Skipping auto generated seclabel");
                 continue;
+            } else {
+                if (!(seclabel = virSecurityLabelDefNew(sec_managers[i]->drv->name)))
+                    goto cleanup;
+                generated = seclabel->implicit = true;
+                seclabel->type = VIR_DOMAIN_SECLABEL_DYNAMIC;
+            }
+        } else {
+            if (seclabel->type == VIR_DOMAIN_SECLABEL_DEFAULT) {
+                if (virSecurityManagerGetDefaultConfined(sec_managers[i])) {
+                    seclabel->type = VIR_DOMAIN_SECLABEL_DYNAMIC;
+                } else {
+                    seclabel->type = VIR_DOMAIN_SECLABEL_NONE;
+                    seclabel->relabel = false;
+                }
+            }
+
+            if (seclabel->type == VIR_DOMAIN_SECLABEL_NONE) {
+                if (virSecurityManagerGetRequireConfined(sec_managers[i])) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                   _("Unconfined guests are not allowed on this host"));
+                    goto cleanup;
+                }
             }
         }
 
@@ -811,8 +813,8 @@ virSecurityManagerCheckChardevLabel(virSecurityManagerPtr mgr,
 {
     size_t i;
 
-    for (i = 0; i < dev->nseclabels; i++) {
-        if (virSecurityManagerCheckModel(mgr, dev->seclabels[i]->model) < 0)
+    for (i = 0; i < dev->source->nseclabels; i++) {
+        if (virSecurityManagerCheckModel(mgr, dev->source->seclabels[i]->model) < 0)
             return -1;
     }
 
@@ -856,12 +858,14 @@ int virSecurityManagerCheckAllLabel(virSecurityManagerPtr mgr,
 int
 virSecurityManagerSetAllLabel(virSecurityManagerPtr mgr,
                               virDomainDefPtr vm,
-                              const char *stdin_path)
+                              const char *stdin_path,
+                              bool chardevStdioLogd)
 {
     if (mgr->drv->domainSetSecurityAllLabel) {
         int ret;
         virObjectLock(mgr);
-        ret = mgr->drv->domainSetSecurityAllLabel(mgr, vm, stdin_path);
+        ret = mgr->drv->domainSetSecurityAllLabel(mgr, vm, stdin_path,
+                                                  chardevStdioLogd);
         virObjectUnlock(mgr);
         return ret;
     }
@@ -874,12 +878,14 @@ virSecurityManagerSetAllLabel(virSecurityManagerPtr mgr,
 int
 virSecurityManagerRestoreAllLabel(virSecurityManagerPtr mgr,
                                   virDomainDefPtr vm,
-                                  bool migrated)
+                                  bool migrated,
+                                  bool chardevStdioLogd)
 {
     if (mgr->drv->domainRestoreSecurityAllLabel) {
         int ret;
         virObjectLock(mgr);
-        ret = mgr->drv->domainRestoreSecurityAllLabel(mgr, vm, migrated);
+        ret = mgr->drv->domainRestoreSecurityAllLabel(mgr, vm, migrated,
+                                                      chardevStdioLogd);
         virObjectUnlock(mgr);
         return ret;
     }

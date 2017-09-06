@@ -61,6 +61,14 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
     dontwarn="$dontwarn -Wenum-compare"
     # gcc 5.1 -Wformat-signedness mishandles enums, not ready for prime time
     dontwarn="$dontwarn -Wformat-signedness"
+    # Several conditionals expand the same on both branches
+    # depending on the particular platform/architecture
+    dontwarn="$dontwarn -Wduplicated-branches"
+    # > This warning does not generally indicate that there is anything wrong
+    # > with your code; it merely indicates that GCC's optimizers are unable
+    # > to handle the code effectively.
+    # Source: https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
+    dontwarn="$dontwarn -Wdisabled-optimization"
 
     # gcc 4.2 treats attribute(format) as an implicit attribute(nonnull),
     # which triggers spurious warnings for our usage
@@ -131,6 +139,24 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
         [lv_cv_gcc_wlogical_op_equal_expr_broken=yes])
         CFLAGS="$save_CFLAGS"])
 
+    AC_CACHE_CHECK([whether clang gives bogus warnings for -Wdouble-promotion],
+      [lv_cv_clang_double_promotion_broken], [
+        save_CFLAGS="$CFLAGS"
+        CFLAGS="-O2 -Wdouble-promotion -Werror"
+        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+          #include <math.h>
+        ]], [[
+          float f = 0.0;
+	  return isnan(f);]])],
+        [lv_cv_clang_double_promotion_broken=no],
+        [lv_cv_clang_double_promotion_broken=yes])
+        CFLAGS="$save_CFLAGS"])
+
+    if test "$lv_cv_clang_double_promotion_broken" = "yes";
+    then
+      dontwarn="$dontwarn -Wdouble-promotion"
+    fi
+
     # We might fundamentally need some of these disabled forever, but
     # ideally we'd turn many of them on
     dontwarn="$dontwarn -Wfloat-equal"
@@ -166,11 +192,15 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
       wantwarn="$wantwarn -Wno-format"
     fi
 
+    # -Wformat enables this by default, and we should keep it,
+    # but need to rewrite various areas of code first
+    wantwarn="$wantwarn -Wno-format-truncation"
+
     # This should be < 256 really. Currently we're down to 4096,
     # but using 1024 bytes sized buffers (mostly for virStrerror)
     # stops us from going down further
-    wantwarn="$wantwarn -Wframe-larger-than=4096"
-    dnl wantwarn="$wantwarn -Wframe-larger-than=256"
+    gl_WARN_ADD([-Wframe-larger-than=4096], [STRICT_FRAME_LIMIT_CFLAGS])
+    gl_WARN_ADD([-Wframe-larger-than=25600], [RELAXED_FRAME_LIMIT_CFLAGS])
 
     # Extra special flags
     dnl -fstack-protector stuff passes gl_WARN_ADD with gcc
@@ -225,7 +255,7 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
         *-fstack-protector-strong*)
         ;;
         *)
-            gl_WARN_ADD(["-fstack-protector-all"])
+            gl_WARN_ADD([-fstack-protector-all])
         ;;
         esac
         ;;

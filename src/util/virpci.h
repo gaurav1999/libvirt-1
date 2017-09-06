@@ -58,6 +58,7 @@ typedef enum {
     VIR_PCIE_LINK_SPEED_25,
     VIR_PCIE_LINK_SPEED_5,
     VIR_PCIE_LINK_SPEED_8,
+    VIR_PCIE_LINK_SPEED_16,
     VIR_PCIE_LINK_SPEED_LAST
 } virPCIELinkSpeed;
 
@@ -186,6 +187,9 @@ int virPCIDeviceIsAssignable(virPCIDevicePtr dev,
                              int strict_acs_check);
 int virPCIDeviceWaitForCleanup(virPCIDevicePtr dev, const char *matcher);
 
+virPCIDeviceAddressPtr
+virPCIGetDeviceAddressFromSysfsLink(const char *device_link);
+
 int virPCIGetPhysicalFunction(const char *vf_sysfs_path,
                               virPCIDeviceAddressPtr *pf);
 
@@ -203,7 +207,10 @@ int virPCIGetVirtualFunctionIndex(const char *pf_sysfs_device_link,
 int virPCIDeviceAddressGetSysfsFile(virPCIDeviceAddressPtr addr,
                                     char **pci_sysfs_device_link);
 
-int virPCIGetNetName(char *device_link_sysfs_path, char **netname);
+int virPCIGetNetName(const char *device_link_sysfs_path,
+                     size_t idx,
+                     char *physPortID,
+                     char **netname);
 
 int virPCIGetSysfsFile(char *virPCIDeviceName,
                              char **pci_sysfs_device_link)
@@ -219,9 +226,12 @@ int virPCIGetAddrString(unsigned int domain,
 int virPCIDeviceAddressParse(char *address, virPCIDeviceAddressPtr bdf);
 
 int virPCIGetVirtualFunctionInfo(const char *vf_sysfs_device_path,
-                                 char **pfname, int *vf_index);
+                                 int pfNetDevIdx,
+                                 char **pfname,
+                                 int *vf_index);
 
 int virPCIDeviceUnbind(virPCIDevicePtr dev);
+int virPCIDeviceRebind(virPCIDevicePtr dev);
 int virPCIDeviceGetDriverPathAndName(virPCIDevicePtr dev,
                                      char **path,
                                      char **name);

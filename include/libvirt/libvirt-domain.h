@@ -815,6 +815,14 @@ typedef enum {
      * post-copy mode. See virDomainMigrateStartPostCopy for more details.
      */
     VIR_MIGRATE_POSTCOPY          = (1 << 15),
+
+    /* Setting the VIR_MIGRATE_TLS flag will cause the migration to attempt
+     * to use the TLS environment configured by the hypervisor in order to
+     * perform the migration. If incorrectly configured on either source or
+     * destination, the migration will fail.
+     */
+    VIR_MIGRATE_TLS               = (1 << 16),
+
 } virDomainMigrateFlags;
 
 
@@ -1031,6 +1039,10 @@ int virDomainMigrateToURI3(virDomainPtr domain,
                            unsigned int nparams,
                            unsigned int flags);
 
+int virDomainMigrateGetMaxDowntime(virDomainPtr domain,
+                                   unsigned long long *downtime,
+                                   unsigned int flags);
+
 int virDomainMigrateSetMaxDowntime (virDomainPtr domain,
                                     unsigned long long downtime,
                                     unsigned int flags);
@@ -1201,6 +1213,12 @@ int                    virDomainHasManagedSaveImage(virDomainPtr dom,
                                                     unsigned int flags);
 int                    virDomainManagedSaveRemove(virDomainPtr dom,
                                                   unsigned int flags);
+char *                 virDomainManagedSaveGetXMLDesc(virDomainPtr domain,
+                                                      unsigned int flags);
+int                    virDomainManagedSaveDefineXML(virDomainPtr domain,
+                                                     const char *dxml,
+                                                     unsigned int flags);
+
 
 /*
  * Domain core dump
@@ -2301,21 +2319,21 @@ int virDomainSetPerfEvents(virDomainPtr dom,
 typedef enum {
     VIR_DOMAIN_BLOCK_JOB_TYPE_UNKNOWN = 0, /* Placeholder */
 
-    VIR_DOMAIN_BLOCK_JOB_TYPE_PULL = 1,
     /* Block Pull (virDomainBlockPull, or virDomainBlockRebase without
      * flags), job ends on completion */
+    VIR_DOMAIN_BLOCK_JOB_TYPE_PULL = 1,
 
-    VIR_DOMAIN_BLOCK_JOB_TYPE_COPY = 2,
     /* Block Copy (virDomainBlockCopy, or virDomainBlockRebase with
      * flags), job exists as long as mirroring is active */
+    VIR_DOMAIN_BLOCK_JOB_TYPE_COPY = 2,
 
-    VIR_DOMAIN_BLOCK_JOB_TYPE_COMMIT = 3,
     /* Block Commit (virDomainBlockCommit without flags), job ends on
      * completion */
+    VIR_DOMAIN_BLOCK_JOB_TYPE_COMMIT = 3,
 
-    VIR_DOMAIN_BLOCK_JOB_TYPE_ACTIVE_COMMIT = 4,
     /* Active Block Commit (virDomainBlockCommit with flags), job
      * exists as long as sync is active */
+    VIR_DOMAIN_BLOCK_JOB_TYPE_ACTIVE_COMMIT = 4,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_BLOCK_JOB_TYPE_LAST
@@ -2420,6 +2438,9 @@ typedef enum {
                                                  backing chain */
     VIR_DOMAIN_BLOCK_COPY_REUSE_EXT = 1 << 1, /* Reuse existing external
                                                  file for a copy */
+    VIR_DOMAIN_BLOCK_COPY_TRANSIENT_JOB = 1 << 2, /* Don't force usage of
+                                                     recoverable job for the
+                                                     copy operation */
 } virDomainBlockCopyFlags;
 
 /**
@@ -2975,7 +2996,16 @@ typedef enum {
  * Details on the cause of a 'shutdown' lifecycle event
  */
 typedef enum {
-    VIR_DOMAIN_EVENT_SHUTDOWN_FINISHED = 0, /* Guest finished shutdown sequence */
+    /* Guest finished shutdown sequence */
+    VIR_DOMAIN_EVENT_SHUTDOWN_FINISHED = 0,
+
+    /* Domain finished shutting down after request from the guest itself
+     * (e.g. hardware-specific action) */
+    VIR_DOMAIN_EVENT_SHUTDOWN_GUEST = 1,
+
+    /* Domain finished shutting down after request from the host (e.g. killed by
+     * a signal) */
+    VIR_DOMAIN_EVENT_SHUTDOWN_HOST = 2,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_EVENT_SHUTDOWN_LAST
@@ -3108,6 +3138,31 @@ int virDomainGetJobStats(virDomainPtr domain,
                          int *nparams,
                          unsigned int flags);
 int virDomainAbortJob(virDomainPtr dom);
+
+typedef enum {
+    VIR_DOMAIN_JOB_OPERATION_UNKNOWN = 0,
+    VIR_DOMAIN_JOB_OPERATION_START = 1,
+    VIR_DOMAIN_JOB_OPERATION_SAVE = 2,
+    VIR_DOMAIN_JOB_OPERATION_RESTORE = 3,
+    VIR_DOMAIN_JOB_OPERATION_MIGRATION_IN = 4,
+    VIR_DOMAIN_JOB_OPERATION_MIGRATION_OUT = 5,
+    VIR_DOMAIN_JOB_OPERATION_SNAPSHOT = 6,
+    VIR_DOMAIN_JOB_OPERATION_SNAPSHOT_REVERT = 7,
+    VIR_DOMAIN_JOB_OPERATION_DUMP = 8,
+
+# ifdef VIR_ENUM_SENTINELS
+    VIR_DOMAIN_JOB_OPERATION_LAST
+# endif
+} virDomainJobOperation;
+
+/**
+ * VIR_DOMAIN_JOB_OPERATION:
+ *
+ * virDomainGetJobStats field: the operation which started the job as
+ * VIR_TYPED_PARAM_INT. The values correspond to the items in
+ * virDomainJobOperation enum.
+ */
+# define VIR_DOMAIN_JOB_OPERATION                "operation"
 
 /**
  * VIR_DOMAIN_JOB_TIME_ELAPSED:
@@ -3667,12 +3722,13 @@ typedef void (*virConnectDomainEventBlockJobCallback)(virConnectPtr conn,
  * The reason describing why this callback is called
  */
 typedef enum {
-    VIR_DOMAIN_EVENT_DISK_CHANGE_MISSING_ON_START = 0,
-    /* removable media changed to empty according to startup policy as source
+    /* Removable media changed to empty according to startup policy as source
      * was missing. oldSrcPath is set, newSrcPath is NULL */
-    VIR_DOMAIN_EVENT_DISK_DROP_MISSING_ON_START = 1,
-    /* disk was dropped from domain as source file was missing.
+    VIR_DOMAIN_EVENT_DISK_CHANGE_MISSING_ON_START = 0,
+
+    /* Disk was dropped from domain as source file was missing.
      * oldSrcPath is set, newSrcPath is NULL */
+    VIR_DOMAIN_EVENT_DISK_DROP_MISSING_ON_START = 1,
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_EVENT_DISK_CHANGE_LAST
@@ -4267,6 +4323,36 @@ typedef void (*virConnectDomainEventAgentLifecycleCallback)(virConnectPtr conn,
 
 
 /**
+ * virConnectDomainEventBlockThresholdCallback:
+ * @conn: connection object
+ * @dom: domain on which the event occurred
+ * @dev: name associated with the affected disk or storage backing chain
+ *       element
+ * @path: for local storage, the path of the backing chain element
+ * @threshold: threshold offset in bytes
+ * @excess: number of bytes written beyond the threshold
+ * @opaque: application specified data
+ *
+ * The callback occurs when the hypervisor detects that the given storage
+ * element was written beyond the point specified by @threshold. The excess
+ * data size written beyond @threshold is reported by @excess (if supported
+ * by the hypervisor, 0 otherwise). The event is useful for thin-provisioned
+ * storage.
+ *
+ * The threshold size can be set via the virDomainSetBlockThreshold API.
+ *
+ * The callback signature to use when registering for an event of type
+ * VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD with virConnectDomainEventRegisterAny()
+ */
+typedef void (*virConnectDomainEventBlockThresholdCallback)(virConnectPtr conn,
+                                                            virDomainPtr dom,
+                                                            const char *dev,
+                                                            const char *path,
+                                                            unsigned long long threshold,
+                                                            unsigned long long excess,
+                                                            void *opaque);
+
+/**
  * VIR_DOMAIN_EVENT_CALLBACK:
  *
  * Used to cast the event specific callback into the generic one
@@ -4307,6 +4393,7 @@ typedef enum {
     VIR_DOMAIN_EVENT_ID_JOB_COMPLETED = 21,  /* virConnectDomainEventJobCompletedCallback */
     VIR_DOMAIN_EVENT_ID_DEVICE_REMOVAL_FAILED = 22, /* virConnectDomainEventDeviceRemovalFailedCallback */
     VIR_DOMAIN_EVENT_ID_METADATA_CHANGE = 23, /* virConnectDomainEventMetadataChangeCallback */
+    VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD = 24, /* virConnectDomainEventBlockThresholdCallback */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_DOMAIN_EVENT_ID_LAST
@@ -4624,5 +4711,10 @@ int virDomainSetVcpu(virDomainPtr domain,
                      const char *vcpumap,
                      int state,
                      unsigned int flags);
+
+int virDomainSetBlockThreshold(virDomainPtr domain,
+                               const char *dev,
+                               unsigned long long threshold,
+                               unsigned int flags);
 
 #endif /* __VIR_LIBVIRT_DOMAIN_H__ */

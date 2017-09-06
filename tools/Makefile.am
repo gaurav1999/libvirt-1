@@ -23,6 +23,8 @@ INCLUDES = \
 	-I$(top_srcdir)						\
 	$(GETTEXT_CPPFLAGS)
 
+WARN_CFLAGS += $(STRICT_FRAME_LIMIT_CFLAGS)
+
 AM_LDFLAGS = \
 	$(RELRO_LDFLAGS)					\
 	$(NO_INDIRECT_LDFLAGS)					\
@@ -224,6 +226,7 @@ virsh_SOURCES =							\
 		virsh-pool.c virsh-pool.h			\
 		virsh-secret.c virsh-secret.h			\
 		virsh-snapshot.c virsh-snapshot.h		\
+		virsh-util.c virsh-util.h			\
 		virsh-volume.c virsh-volume.h			\
 		$(NULL)
 
@@ -241,7 +244,8 @@ virsh_CFLAGS =							\
 		$(WARN_CFLAGS)					\
 		$(PIE_CFLAGS)					\
 		$(COVERAGE_CFLAGS)				\
-		$(LIBXML_CFLAGS)
+		$(LIBXML_CFLAGS)				\
+		$(READLINE_CFLAGS)
 
 virt_admin_SOURCES =						\
 		virt-admin.c virt-admin.h			\
@@ -435,7 +439,7 @@ wireshark/src/packet-libvirt.c: wireshark/src/packet-libvirt.h \
 		wireshark/src/libvirt/protocol.h
 
 wireshark/src/plugin.c: wireshark/src/packet-libvirt.c
-	cd wireshark/src && \
+	$(AM_V_GEN)cd wireshark/src && \
 		$(abs_top_srcdir)/tools/wireshark/util/make-dissector-reg \
 		. plugin packet-libvirt.c
 
@@ -447,7 +451,7 @@ WS_DISSECTOR_PROTO_FILES  = \
 
 wireshark/src/libvirt/protocol.h: wireshark/util/genxdrstub.pl \
 		$(WS_DISSECTOR_PROTO_FILES)
-	$(MKDIR_P) wireshark/src/libvirt
+	$(AM_V_GEN)$(MKDIR_P) wireshark/src/libvirt && \
 	cd wireshark/src && \
 	LIBVIRT_VERSION=$(LIBVIRT_VERSION) \
 		  $(PERL) $(abs_top_srcdir)/tools/wireshark/util/genxdrstub.pl \

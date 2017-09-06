@@ -281,6 +281,13 @@ while (<PROTOCOL>) {
             $calls{$name}->{streamflag} = "none";
         }
 
+        if (exists $opts{sparseflag}) {
+            die "\@sparseflag requires stream" unless $calls{$name}->{streamflag} ne "none";
+            $calls{$name}->{sparseflag} = $opts{sparseflag};
+        } else {
+            $calls{$name}->{sparseflag} = "none";
+        }
+
         $calls{$name}->{acl} = $opts{acl};
         $calls{$name}->{aclfilter} = $opts{aclfilter};
 
@@ -982,6 +989,11 @@ elsif ($mode eq "server") {
         if ($call->{streamflag} ne "none") {
             print "    virStreamPtr st = NULL;\n";
             print "    daemonClientStreamPtr stream = NULL;\n";
+            if ($call->{sparseflag} ne "none") {
+                print "    const bool sparse = args->flags & $call->{sparseflag};\n"
+            } else {
+                print "    const bool sparse = false;\n";
+            }
         }
 
         print "\n";
@@ -1024,7 +1036,7 @@ elsif ($mode eq "server") {
             print "    if (!(st = virStreamNew(priv->conn, VIR_STREAM_NONBLOCK)))\n";
             print "        goto cleanup;\n";
             print "\n";
-            print "    if (!(stream = daemonCreateClientStream(client, st, remoteProgram, &msg->header)))\n";
+            print "    if (!(stream = daemonCreateClientStream(client, st, remoteProgram, &msg->header, sparse)))\n";
             print "        goto cleanup;\n";
             print "\n";
         }
@@ -1501,6 +1513,7 @@ elsif ($mode eq "client") {
                     $single_ret_list_name = $1;
                     $single_ret_list_max_var = "max$1";
                     $single_ret_list_max_define = $2;
+                    $single_ret_list_error_msg_type = "string";
                 } elsif ($ret_member =~ m/^(admin|remote)_nonnull_string (\S+)<\S+>;/) {
                     # error out on unannotated arrays
                     die "$1_nonnull_string array without insert@<offset> annotation: $ret_member";
@@ -1727,6 +1740,11 @@ elsif ($mode eq "client") {
 
         if ($call->{streamflag} ne "none") {
             print "    virNetClientStreamPtr netst = NULL;\n";
+            if ($call->{sparseflag} ne "none") {
+                print "    const bool sparse = flags & $call->{sparseflag};\n"
+            } else {
+                print "    const bool sparse = false;\n";
+            }
         }
 
         print "\n";
@@ -1738,7 +1756,7 @@ elsif ($mode eq "client") {
 
         if ($call->{streamflag} ne "none") {
             print "\n";
-            print "    if (!(netst = virNetClientStreamNew(priv->remoteProgram, $call->{constname}, priv->counter)))\n";
+            print "    if (!(netst = virNetClientStreamNew(st, priv->remoteProgram, $call->{constname}, priv->counter, sparse)))\n";
             print "        goto done;\n";
             print "\n";
             print "    if (virNetClientAddStream(priv->client, netst) < 0) {\n";
@@ -1773,7 +1791,8 @@ elsif ($mode eq "client") {
             print "\n";
             print "    if ($single_ret_list_max_var > $single_ret_list_max_define) {\n";
             print "        virReportError(VIR_ERR_RPC,\n";
-            print "                       _(\"too many remote ${single_ret_list_error_msg_type}s: %d > %d\"),\n";
+            print "                       _(\"too many remote ${single_ret_list_error_msg_type}s: %d > %d,\"\n";
+            print "                         \"in parameter '$single_ret_list_name' for 'vir$call->{ProcName}'\"),\n";
             print "                       $single_ret_list_max_var, $single_ret_list_max_define);\n";
             print "        goto done;\n";
             print "    }\n";
@@ -1839,7 +1858,8 @@ elsif ($mode eq "client") {
             $modern_ret_as_list) {
             print "    if (ret.$single_ret_list_name.${single_ret_list_name}_len > $single_ret_list_max_var) {\n";
             print "        virReportError(VIR_ERR_RPC,\n";
-            print "                       _(\"too many remote ${single_ret_list_error_msg_type}s: %d > %d\"),\n";
+            print "                       _(\"too many remote ${single_ret_list_error_msg_type}s: %d > %d,\"\n";
+            print "                         \"in parameter '$single_ret_list_name' for 'vir$call->{ProcName}'\"),\n";
             print "                       ret.$single_ret_list_name.${single_ret_list_name}_len, $single_ret_list_max_var);\n";
             print "        goto cleanup;\n";
             print "    }\n";

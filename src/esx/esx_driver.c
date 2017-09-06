@@ -1509,12 +1509,10 @@ esxDomainLookupByID(virConnectPtr conn, int id)
         if (id != id_candidate)
             continue;
 
-        domain = virGetDomain(conn, name_candidate, uuid_candidate);
+        domain = virGetDomain(conn, name_candidate, uuid_candidate, id);
 
         if (!domain)
             goto cleanup;
-
-        domain->id = id;
 
         break;
     }
@@ -1557,17 +1555,11 @@ esxDomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
         goto cleanup;
     }
 
-    domain = virGetDomain(conn, name, uuid);
-
-    if (!domain)
-        goto cleanup;
-
     /* Only running/suspended virtual machines have an ID != -1 */
-    if (powerState != esxVI_VirtualMachinePowerState_PoweredOff) {
-        domain->id = id;
-    } else {
-        domain->id = -1;
-    }
+    if (powerState == esxVI_VirtualMachinePowerState_PoweredOff)
+        id = -1;
+
+    domain = virGetDomain(conn, name, uuid, id);
 
  cleanup:
     esxVI_String_Free(&propertyNameList);
@@ -1613,17 +1605,11 @@ esxDomainLookupByName(virConnectPtr conn, const char *name)
         goto cleanup;
     }
 
-    domain = virGetDomain(conn, name, uuid);
-
-    if (!domain)
-        goto cleanup;
-
     /* Only running/suspended virtual machines have an ID != -1 */
-    if (powerState != esxVI_VirtualMachinePowerState_PoweredOff) {
-        domain->id = id;
-    } else {
-        domain->id = -1;
-    }
+    if (powerState == esxVI_VirtualMachinePowerState_PoweredOff)
+        id = -1;
+
+    domain = virGetDomain(conn, name, uuid, id);
 
  cleanup:
     esxVI_String_Free(&propertyNameList);
@@ -2659,6 +2645,7 @@ esxDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     esxVI_ObjectContent *virtualMachine = NULL;
     esxVI_VirtualMachinePowerState powerState;
     int id;
+    char *moref = NULL;
     char *vmPathName = NULL;
     char *datastoreName = NULL;
     char *directoryName = NULL;
@@ -2684,6 +2671,7 @@ esxDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
         esxVI_LookupVirtualMachineByUuid(priv->primary, domain->uuid,
                                          propertyNameList, &virtualMachine,
                                          esxVI_Occurrence_RequiredItem) < 0 ||
+        esxVI_GetVirtualMachineMORef(virtualMachine, &moref) < 0 ||
         esxVI_GetVirtualMachinePowerState(virtualMachine, &powerState) < 0 ||
         esxVI_GetVirtualMachineIdentity(virtualMachine, &id, NULL, NULL) < 0 ||
         esxVI_GetStringValue(virtualMachine, "config.files.vmPathName",
@@ -2729,6 +2717,7 @@ esxDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
     ctx.formatFileName = NULL;
     ctx.autodetectSCSIControllerModel = NULL;
     ctx.datacenterPath = priv->primary->datacenterPath;
+    ctx.moref = moref;
 
     def = virVMXParseConfig(&ctx, priv->xmlopt, priv->caps, vmx);
 
@@ -2746,6 +2735,7 @@ esxDomainGetXMLDesc(virDomainPtr domain, unsigned int flags)
 
     esxVI_String_Free(&propertyNameList);
     esxVI_ObjectContent_Free(&virtualMachine);
+    VIR_FREE(moref);
     VIR_FREE(datastoreName);
     VIR_FREE(directoryName);
     VIR_FREE(directoryAndFileName);
@@ -2788,6 +2778,7 @@ esxConnectDomainXMLFromNative(virConnectPtr conn, const char *nativeFormat,
     ctx.formatFileName = NULL;
     ctx.autodetectSCSIControllerModel = NULL;
     ctx.datacenterPath = NULL;
+    ctx.moref = NULL;
 
     def = virVMXParseConfig(&ctx, priv->xmlopt, priv->caps, nativeConfig);
 
@@ -2844,6 +2835,7 @@ esxConnectDomainXMLToNative(virConnectPtr conn, const char *nativeFormat,
     ctx.formatFileName = esxFormatVMXFileName;
     ctx.autodetectSCSIControllerModel = esxAutodetectSCSIControllerModel;
     ctx.datacenterPath = NULL;
+    ctx.moref = NULL;
 
     vmx = virVMXFormatConfig(&ctx, priv->xmlopt, def, virtualHW_version);
 
@@ -3091,6 +3083,7 @@ esxDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
     ctx.formatFileName = esxFormatVMXFileName;
     ctx.autodetectSCSIControllerModel = esxAutodetectSCSIControllerModel;
     ctx.datacenterPath = NULL;
+    ctx.moref = NULL;
 
     vmx = virVMXFormatConfig(&ctx, priv->xmlopt, def, virtualHW_version);
 
@@ -3208,10 +3201,7 @@ esxDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flags)
         goto cleanup;
     }
 
-    domain = virGetDomain(conn, def->name, def->uuid);
-
-    if (domain)
-        domain->id = -1;
+    domain = virGetDomain(conn, def->name, def->uuid, -1);
 
     /* FIXME: Add proper rollback in case of an error */
 
@@ -4282,7 +4272,7 @@ esxDomainSnapshotGetXMLDesc(virDomainSnapshotPtr snapshot,
 
     virUUIDFormat(snapshot->domain->uuid, uuid_string);
 
-    xml = virDomainSnapshotDefFormat(uuid_string, &def, priv->caps,
+    xml = virDomainSnapshotDefFormat(uuid_string, &def, priv->caps, priv->xmlopt,
                                      virDomainDefFormatConvertXMLFlags(flags),
                                      0);
 
@@ -5105,14 +5095,12 @@ esxConnectListAllDomains(virConnectPtr conn,
         if (VIR_RESIZE_N(doms, ndoms, count, 2) < 0)
             goto cleanup;
 
-        if (!(dom = virGetDomain(conn, name, uuid)))
-            goto cleanup;
-
         /* Only running/suspended virtual machines have an ID != -1 */
-        if (powerState != esxVI_VirtualMachinePowerState_PoweredOff)
-            dom->id = id;
-        else
-            dom->id = -1;
+        if (powerState == esxVI_VirtualMachinePowerState_PoweredOff)
+            id = -1;
+
+        if (!(dom = virGetDomain(conn, name, uuid, id)))
+            goto cleanup;
 
         doms[count++] = dom;
     }

@@ -48,6 +48,7 @@
 # include "virclosecallbacks.h"
 # include "virhostdev.h"
 # include "virfile.h"
+# include "virfilecache.h"
 # include "virfirmware.h"
 
 # ifdef CPU_SETSIZE /* Linux */
@@ -112,6 +113,7 @@ struct _virQEMUDriverConfig {
     char *nvramDir;
 
     char *defaultTLSx509certdir;
+    bool checkdefaultTLSx509certdir;
     bool defaultTLSx509verify;
     char *defaultTLSx509secretUUID;
 
@@ -136,6 +138,10 @@ struct _virQEMUDriverConfig {
     char *chardevTLSx509certdir;
     bool chardevTLSx509verify;
     char *chardevTLSx509secretUUID;
+
+    char *migrateTLSx509certdir;
+    bool migrateTLSx509verify;
+    char *migrateTLSx509secretUUID;
 
     unsigned int remotePortMin;
     unsigned int remotePortMax;
@@ -241,7 +247,7 @@ struct _virQEMUDriver {
     virDomainXMLOptionPtr xmlopt;
 
     /* Immutable pointer, self-locking APIs */
-    virQEMUCapsCachePtr qemuCapsCache;
+    virFileCachePtr qemuCapsCache;
 
     /* Immutable pointer, self-locking APIs */
     virObjectEventStatePtr domainEventState;
@@ -296,6 +302,9 @@ virQEMUDriverConfigPtr virQEMUDriverConfigNew(bool privileged);
 int virQEMUDriverConfigLoadFile(virQEMUDriverConfigPtr cfg,
                                 const char *filename,
                                 bool privileged);
+
+int
+virQEMUDriverConfigValidate(virQEMUDriverConfigPtr cfg);
 
 virQEMUDriverConfigPtr virQEMUDriverGetConfig(virQEMUDriverPtr driver);
 bool virQEMUDriverIsPrivileged(virQEMUDriverPtr driver);

@@ -47,7 +47,7 @@
 
 #define VIR_FROM_THIS VIR_FROM_RPC
 
-VIR_LOG_INIT("rpc.netserver");
+VIR_LOG_INIT("rpc.netdaemon");
 
 typedef struct _virNetDaemonSignal virNetDaemonSignal;
 typedef virNetDaemonSignal *virNetDaemonSignalPtr;
@@ -401,6 +401,7 @@ virNetDaemonPreExecRestart(virNetDaemonPtr dmn)
         }
     }
 
+    VIR_FREE(srvArray);
     virObjectUnlock(dmn);
 
     return object;
@@ -436,16 +437,14 @@ virNetDaemonAutoShutdown(virNetDaemonPtr dmn,
 }
 
 
-#if defined(HAVE_DBUS) && defined(DBUS_TYPE_UNIX_FD)
+#if defined(WITH_DBUS) && defined(DBUS_TYPE_UNIX_FD)
 static void
-virNetDaemonGotInhibitReply(DBusPendingCall *pending,
-                            void *opaque)
+virNetDaemonGotInhibitReplyLocked(DBusPendingCall *pending,
+                                  virNetDaemonPtr dmn)
 {
-    virNetDaemonPtr dmn = opaque;
     DBusMessage *reply;
     int fd;
 
-    virObjectLock(dmn);
     dmn->autoShutdownCallingInhibit = false;
 
     VIR_DEBUG("dmn=%p", dmn);
@@ -459,14 +458,28 @@ virNetDaemonGotInhibitReply(DBusPendingCall *pending,
                               DBUS_TYPE_INVALID)) {
         if (dmn->autoShutdownInhibitions) {
             dmn->autoShutdownInhibitFd = fd;
+            VIR_DEBUG("Got inhibit FD %d", fd);
         } else {
             /* We stopped the last VM since we made the inhibit call */
+            VIR_DEBUG("Closing inhibit FD %d", fd);
             VIR_FORCE_CLOSE(fd);
         }
     }
     virDBusMessageUnref(reply);
 
  cleanup:
+    dbus_pending_call_unref(pending);
+}
+
+
+static void
+virNetDaemonGotInhibitReply(DBusPendingCall *pending,
+                            void *opaque)
+{
+    virNetDaemonPtr dmn = opaque;
+
+    virObjectLock(dmn);
+    virNetDaemonGotInhibitReplyLocked(pending, dmn);
     virObjectUnlock(dmn);
 }
 
@@ -480,7 +493,7 @@ virNetDaemonCallInhibit(virNetDaemonPtr dmn,
                         const char *mode)
 {
     DBusMessage *message;
-    DBusPendingCall *pendingReply;
+    DBusPendingCall *pendingReply = NULL;
     DBusConnection *systemBus;
 
     VIR_DEBUG("dmn=%p what=%s who=%s why=%s mode=%s",
@@ -507,13 +520,17 @@ virNetDaemonCallInhibit(virNetDaemonPtr dmn,
                              DBUS_TYPE_STRING, &mode,
                              DBUS_TYPE_INVALID);
 
-    pendingReply = NULL;
     if (dbus_connection_send_with_reply(systemBus, message,
                                         &pendingReply,
-                                        25*1000)) {
-        dbus_pending_call_set_notify(pendingReply,
-                                     virNetDaemonGotInhibitReply,
-                                     dmn, NULL);
+                                        25 * 1000) &&
+        pendingReply) {
+        if (dbus_pending_call_get_completed(pendingReply)) {
+            virNetDaemonGotInhibitReplyLocked(pendingReply, dmn);
+        } else {
+            dbus_pending_call_set_notify(pendingReply,
+                                         virNetDaemonGotInhibitReply,
+                                         dmn, NULL);
+        }
         dmn->autoShutdownCallingInhibit = true;
     }
     virDBusMessageUnref(message);
@@ -528,7 +545,7 @@ virNetDaemonAddShutdownInhibition(virNetDaemonPtr dmn)
 
     VIR_DEBUG("dmn=%p inhibitions=%zu", dmn, dmn->autoShutdownInhibitions);
 
-#if defined(HAVE_DBUS) && defined(DBUS_TYPE_UNIX_FD)
+#if defined(WITH_DBUS) && defined(DBUS_TYPE_UNIX_FD)
     if (dmn->autoShutdownInhibitions == 1)
         virNetDaemonCallInhibit(dmn,
                                 "shutdown",
@@ -549,8 +566,10 @@ virNetDaemonRemoveShutdownInhibition(virNetDaemonPtr dmn)
 
     VIR_DEBUG("dmn=%p inhibitions=%zu", dmn, dmn->autoShutdownInhibitions);
 
-    if (dmn->autoShutdownInhibitions == 0)
+    if (dmn->autoShutdownInhibitions == 0) {
+        VIR_DEBUG("Closing inhibit FD %d", dmn->autoShutdownInhibitFd);
         VIR_FORCE_CLOSE(dmn->autoShutdownInhibitFd);
+    }
 
     virObjectUnlock(dmn);
 }

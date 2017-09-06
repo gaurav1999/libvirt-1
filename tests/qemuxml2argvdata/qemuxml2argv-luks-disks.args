@@ -4,7 +4,7 @@ HOME=/home/test \
 USER=test \
 LOGNAME=test \
 QEMU_AUDIO_DRV=none \
-/usr/bin/qemu \
+/usr/bin/qemu-system-x86_64 \
 -name encryptdisk \
 -S \
 -object secret,id=masterKey0,format=raw,\
@@ -15,7 +15,9 @@ file=/tmp/lib/domain--1-encryptdisk/master-key.aes \
 -uuid 496898a6-e6ff-f7c8-5dc2-3cf410945ee9 \
 -nographic \
 -nodefaults \
--monitor unix:/tmp/lib/domain--1-encryptdisk/monitor.sock,server,nowait \
+-chardev socket,id=charmonitor,\
+path=/tmp/lib/domain--1-encryptdisk/monitor.sock,server,nowait \
+-mon chardev=charmonitor,id=monitor,mode=readline \
 -no-acpi \
 -boot c \
 -usb \

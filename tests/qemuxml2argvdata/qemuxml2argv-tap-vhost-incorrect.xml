@@ -15,7 +15,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>restart</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu</emulator>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
     <controller type='usb' index='0'/>
     <controller type='virtio-serial' index='0'>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x06' function='0x0'/>
@@ -24,7 +24,7 @@
     <controller type='pci' index='0' model='pci-root'/>
     <interface type='user'>
       <mac address='52:54:00:e5:48:58'/>
-      <model type='definitely-not-virtio'/>
+      <model type='e1000'/>
       <driver name='vhost' queues='5'/>
       <backend tap='/dev/null' vhost='/dev/zero'/>
     </interface>

@@ -57,7 +57,7 @@ bhyveCollectPCIAddress(virDomainDefPtr def ATTRIBUTE_UNUSED,
     }
 
     if (virDomainPCIAddressReserveAddr(addrs, addr,
-                                       VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0) {
+                                       VIR_PCI_CONNECT_TYPE_PCI_DEVICE, 0) < 0) {
         goto cleanup;
     }
 
@@ -100,13 +100,15 @@ bhyveAssignDevicePCISlots(virDomainDefPtr def,
     lpc_addr.slot = 0x1;
 
     if (virDomainPCIAddressReserveAddr(addrs, &lpc_addr,
-                                       VIR_PCI_CONNECT_TYPE_PCI_DEVICE) < 0) {
+                                       VIR_PCI_CONNECT_TYPE_PCI_DEVICE, 0) < 0) {
         goto error;
     }
 
     for (i = 0; i < def->ncontrollers; i++) {
         if ((def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_PCI) ||
-            (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SATA)) {
+            (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SATA) ||
+            ((def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_USB) &&
+             (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_USB_NEC_XHCI))) {
             if (def->controllers[i]->model == VIR_DOMAIN_CONTROLLER_MODEL_PCI_ROOT ||
                 !virDeviceInfoPCIAddressWanted(&def->controllers[i]->info))
                 continue;

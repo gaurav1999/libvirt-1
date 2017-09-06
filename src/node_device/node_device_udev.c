@@ -43,6 +43,7 @@
 #include "virpci.h"
 #include "virstring.h"
 #include "virnetdev.h"
+#include "virmdev.h"
 
 #define VIR_FROM_THIS VIR_FROM_NODEDEV
 
@@ -70,8 +71,9 @@ udevHasDeviceProperty(struct udev_device *dev,
 }
 
 
-static const char *udevGetDeviceProperty(struct udev_device *udev_device,
-                                         const char *property_key)
+static const char *
+udevGetDeviceProperty(struct udev_device *udev_device,
+                      const char *property_key)
 {
     const char *ret = NULL;
 
@@ -84,9 +86,10 @@ static const char *udevGetDeviceProperty(struct udev_device *udev_device,
 }
 
 
-static int udevGetStringProperty(struct udev_device *udev_device,
-                                 const char *property_key,
-                                 char **value)
+static int
+udevGetStringProperty(struct udev_device *udev_device,
+                      const char *property_key,
+                      char **value)
 {
     if (VIR_STRDUP(*value,
                    udevGetDeviceProperty(udev_device, property_key)) < 0)
@@ -96,10 +99,11 @@ static int udevGetStringProperty(struct udev_device *udev_device,
 }
 
 
-static int udevGetIntProperty(struct udev_device *udev_device,
-                              const char *property_key,
-                              int *value,
-                              int base)
+static int
+udevGetIntProperty(struct udev_device *udev_device,
+                   const char *property_key,
+                   int *value,
+                   int base)
 {
     const char *str = NULL;
 
@@ -114,10 +118,11 @@ static int udevGetIntProperty(struct udev_device *udev_device,
 }
 
 
-static int udevGetUintProperty(struct udev_device *udev_device,
-                               const char *property_key,
-                               unsigned int *value,
-                               int base)
+static int
+udevGetUintProperty(struct udev_device *udev_device,
+                    const char *property_key,
+                    unsigned int *value,
+                    int base)
 {
     const char *str = NULL;
 
@@ -132,8 +137,9 @@ static int udevGetUintProperty(struct udev_device *udev_device,
 }
 
 
-static const char *udevGetDeviceSysfsAttr(struct udev_device *udev_device,
-                                          const char *attr_name)
+static const char *
+udevGetDeviceSysfsAttr(struct udev_device *udev_device,
+                       const char *attr_name)
 {
     const char *ret = NULL;
 
@@ -147,9 +153,10 @@ static const char *udevGetDeviceSysfsAttr(struct udev_device *udev_device,
 }
 
 
-static int udevGetStringSysfsAttr(struct udev_device *udev_device,
-                                  const char *attr_name,
-                                  char **value)
+static int
+udevGetStringSysfsAttr(struct udev_device *udev_device,
+                       const char *attr_name,
+                       char **value)
 {
     if (VIR_STRDUP(*value, udevGetDeviceSysfsAttr(udev_device, attr_name)) < 0)
         return -1;
@@ -163,10 +170,11 @@ static int udevGetStringSysfsAttr(struct udev_device *udev_device,
 }
 
 
-static int udevGetIntSysfsAttr(struct udev_device *udev_device,
-                               const char *attr_name,
-                               int *value,
-                               int base)
+static int
+udevGetIntSysfsAttr(struct udev_device *udev_device,
+                    const char *attr_name,
+                    int *value,
+                    int base)
 {
     const char *str = NULL;
 
@@ -182,10 +190,11 @@ static int udevGetIntSysfsAttr(struct udev_device *udev_device,
 }
 
 
-static int udevGetUintSysfsAttr(struct udev_device *udev_device,
-                                const char *attr_name,
-                                unsigned int *value,
-                                int base)
+static int
+udevGetUintSysfsAttr(struct udev_device *udev_device,
+                     const char *attr_name,
+                     unsigned int *value,
+                     int base)
 {
     const char *str = NULL;
 
@@ -201,9 +210,10 @@ static int udevGetUintSysfsAttr(struct udev_device *udev_device,
 }
 
 
-static int udevGetUint64SysfsAttr(struct udev_device *udev_device,
-                                  const char *attr_name,
-                                  unsigned long long *value)
+static int
+udevGetUint64SysfsAttr(struct udev_device *udev_device,
+                       const char *attr_name,
+                       unsigned long long *value)
 {
     const char *str = NULL;
 
@@ -219,9 +229,10 @@ static int udevGetUint64SysfsAttr(struct udev_device *udev_device,
 }
 
 
-static int udevGenerateDeviceName(struct udev_device *device,
-                                  virNodeDeviceDefPtr def,
-                                  const char *s)
+static int
+udevGenerateDeviceName(struct udev_device *device,
+                       virNodeDeviceDefPtr def,
+                       const char *s)
 {
     size_t i;
     virBuffer buf = VIR_BUFFER_INITIALIZER;
@@ -246,14 +257,16 @@ static int udevGenerateDeviceName(struct udev_device *device,
     return 0;
 }
 
+
 #if HAVE_UDEV_LOGGING
-typedef void (*udevLogFunctionPtr)(struct udev *udev,
-                                   int priority,
-                                   const char *file,
-                                   int line,
-                                   const char *fn,
-                                   const char *format,
-                                   va_list args);
+typedef void
+(*udevLogFunctionPtr)(struct udev *udev,
+                      int priority,
+                      const char *file,
+                      int line,
+                      const char *fn,
+                      const char *format,
+                      va_list args);
 
 static void
 ATTRIBUTE_FMT_PRINTF(6, 0)
@@ -282,10 +295,11 @@ udevLogFunction(struct udev *udev ATTRIBUTE_UNUSED,
 #endif
 
 
-static int udevTranslatePCIIds(unsigned int vendor,
-                               unsigned int product,
-                               char **vendor_string,
-                               char **product_string)
+static int
+udevTranslatePCIIds(unsigned int vendor,
+                    unsigned int product,
+                    char **vendor_string,
+                    char **product_string)
 {
     struct pci_id_match m;
     const char *vendor_name = NULL, *device_name = NULL;
@@ -313,10 +327,123 @@ static int udevTranslatePCIIds(unsigned int vendor,
 }
 
 
-static int udevProcessPCI(struct udev_device *device,
-                          virNodeDeviceDefPtr def)
+static int
+udevFillMdevType(struct udev_device *device,
+                 const char *dir,
+                 virNodeDevCapMdevTypePtr type)
 {
-    const char *syspath = NULL;
+    int ret = -1;
+    char *attrpath = NULL;
+
+#define MDEV_GET_SYSFS_ATTR(attr_name, cb, ...)                             \
+    do {                                                                    \
+        if (virAsprintf(&attrpath, "%s/%s", dir, #attr_name) < 0)           \
+            goto cleanup;                                                   \
+                                                                            \
+        if (cb(device, attrpath, __VA_ARGS__) < 0)                          \
+            goto cleanup;                                                   \
+                                                                            \
+        VIR_FREE(attrpath);                                                 \
+    } while (0)                                                             \
+
+    if (VIR_STRDUP(type->id, last_component(dir)) < 0)
+        goto cleanup;
+
+    /* query udev for the attributes under subdirectories using the relative
+     * path stored in @dir, i.e. 'mdev_supported_types/<type_id>'
+     */
+    MDEV_GET_SYSFS_ATTR(name, udevGetStringSysfsAttr, &type->name);
+    MDEV_GET_SYSFS_ATTR(device_api, udevGetStringSysfsAttr, &type->device_api);
+    MDEV_GET_SYSFS_ATTR(available_instances, udevGetUintSysfsAttr,
+                        &type->available_instances, 10);
+
+#undef MDEV_GET_SYSFS_ATTR
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(attrpath);
+    return ret;
+}
+
+
+static int
+udevPCIGetMdevTypesCap(struct udev_device *device,
+                       virNodeDevCapPCIDevPtr pcidata)
+{
+    int ret = -1;
+    int dirret = -1;
+    DIR *dir = NULL;
+    struct dirent *entry;
+    char *path = NULL;
+    char *tmppath = NULL;
+    virNodeDevCapMdevTypePtr type = NULL;
+    virNodeDevCapMdevTypePtr *types = NULL;
+    size_t ntypes = 0;
+    size_t i;
+
+    if (virAsprintf(&path, "%s/mdev_supported_types",
+                    udev_device_get_syspath(device)) < 0)
+        return -1;
+
+    if ((dirret = virDirOpenIfExists(&dir, path)) < 0)
+        goto cleanup;
+
+    if (dirret == 0) {
+        ret = 0;
+        goto cleanup;
+    }
+
+    if (VIR_ALLOC(types) < 0)
+        goto cleanup;
+
+    /* UDEV doesn't report attributes under subdirectories by default but is
+     * able to query them if the path to the attribute is relative to the
+     * device's base path, e.g. /sys/devices/../0000:00:01.0/ is the device's
+     * base path as udev reports it, but we're interested in attributes under
+     * /sys/devices/../0000:00:01.0/mdev_supported_types/<type>/. So, we need to
+     * scan the subdirectories ourselves.
+     */
+    while ((dirret = virDirRead(dir, &entry, path)) > 0) {
+        if (VIR_ALLOC(type) < 0)
+            goto cleanup;
+
+        /* construct the relative mdev type path bit for udev */
+        if (virAsprintf(&tmppath, "mdev_supported_types/%s", entry->d_name) < 0)
+            goto cleanup;
+
+        if (udevFillMdevType(device, tmppath, type) < 0)
+            goto cleanup;
+
+        if (VIR_APPEND_ELEMENT(types, ntypes, type) < 0)
+            goto cleanup;
+
+        VIR_FREE(tmppath);
+    }
+
+    if (dirret < 0)
+        goto cleanup;
+
+    VIR_STEAL_PTR(pcidata->mdev_types, types);
+    pcidata->nmdev_types = ntypes;
+    pcidata->flags |= VIR_NODE_DEV_CAP_FLAG_PCI_MDEV;
+    ntypes = 0;
+    ret = 0;
+ cleanup:
+    virNodeDevCapMdevTypeFree(type);
+    for (i = 0; i < ntypes; i++)
+        virNodeDevCapMdevTypeFree(types[i]);
+    VIR_FREE(types);
+    VIR_FREE(path);
+    VIR_FREE(tmppath);
+    VIR_DIR_CLOSE(dir);
+    return ret;
+}
+
+
+static int
+udevProcessPCI(struct udev_device *device,
+               virNodeDeviceDefPtr def)
+{
     virNodeDevCapPCIDevPtr pci_dev = &def->caps->data.pci_dev;
     virPCIEDeviceInfoPtr pci_express = NULL;
     virPCIDevicePtr pciDev = NULL;
@@ -324,19 +451,17 @@ static int udevProcessPCI(struct udev_device *device,
     int ret = -1;
     char *p;
 
-    syspath = udev_device_get_syspath(device);
-
     if (udevGetUintProperty(device, "PCI_CLASS", &pci_dev->class, 16) < 0)
         goto cleanup;
 
-    if ((p = strrchr(syspath, '/')) == NULL ||
+    if ((p = strrchr(def->sysfs_path, '/')) == NULL ||
         virStrToLong_ui(p + 1, &p, 16, &pci_dev->domain) < 0 || p == NULL ||
         virStrToLong_ui(p + 1, &p, 16, &pci_dev->bus) < 0 || p == NULL ||
         virStrToLong_ui(p + 1, &p, 16, &pci_dev->slot) < 0 || p == NULL ||
         virStrToLong_ui(p + 1, &p, 16, &pci_dev->function) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("failed to parse the PCI address from sysfs path: '%s'"),
-                       syspath);
+                       def->sysfs_path);
         goto cleanup;
     }
 
@@ -363,8 +488,7 @@ static int udevProcessPCI(struct udev_device *device,
                             &pci_dev->numa_node, 10) < 0)
         goto cleanup;
 
-    if (nodeDeviceSysfsGetPCIRelatedDevCaps(syspath,
-                                            &def->caps->data.pci_dev) < 0)
+    if (nodeDeviceSysfsGetPCIRelatedDevCaps(def->sysfs_path, pci_dev) < 0)
         goto cleanup;
 
     if (!(pciDev = virPCIDeviceNew(pci_dev->domain,
@@ -403,6 +527,12 @@ static int udevProcessPCI(struct udev_device *device,
         }
     }
 
+    /* check whether the device is mediated devices framework capable, if so,
+     * process it
+     */
+    if (udevPCIGetMdevTypesCap(device, pci_dev) < 0)
+        goto cleanup;
+
     ret = 0;
 
  cleanup:
@@ -411,7 +541,9 @@ static int udevProcessPCI(struct udev_device *device,
     return ret;
 }
 
-static int drmGetMinorType(int minor)
+
+static int
+drmGetMinorType(int minor)
 {
     int type = minor >> 6;
 
@@ -428,8 +560,10 @@ static int drmGetMinorType(int minor)
     }
 }
 
-static int udevProcessDRMDevice(struct udev_device *device,
-                                virNodeDeviceDefPtr def)
+
+static int
+udevProcessDRMDevice(struct udev_device *device,
+                     virNodeDeviceDefPtr def)
 {
     virNodeDevCapDRMPtr drm = &def->caps->data.drm;
     int minor;
@@ -448,8 +582,10 @@ static int udevProcessDRMDevice(struct udev_device *device,
     return 0;
 }
 
-static int udevProcessUSBDevice(struct udev_device *device,
-                                virNodeDeviceDefPtr def)
+
+static int
+udevProcessUSBDevice(struct udev_device *device,
+                     virNodeDeviceDefPtr def)
 {
     virNodeDevCapUSBDevPtr usb_dev = &def->caps->data.usb_dev;
 
@@ -490,8 +626,9 @@ static int udevProcessUSBDevice(struct udev_device *device,
 }
 
 
-static int udevProcessUSBInterface(struct udev_device *device,
-                                   virNodeDeviceDefPtr def)
+static int
+udevProcessUSBInterface(struct udev_device *device,
+                        virNodeDeviceDefPtr def)
 {
     virNodeDevCapUSBIfPtr usb_if = &def->caps->data.usb_if;
 
@@ -518,8 +655,9 @@ static int udevProcessUSBInterface(struct udev_device *device,
 }
 
 
-static int udevProcessNetworkInterface(struct udev_device *device,
-                                       virNodeDeviceDefPtr def)
+static int
+udevProcessNetworkInterface(struct udev_device *device,
+                            virNodeDeviceDefPtr def)
 {
     const char *devtype = udev_device_get_devtype(device);
     virNodeDevCapNetPtr net = &def->caps->data.net;
@@ -555,8 +693,9 @@ static int udevProcessNetworkInterface(struct udev_device *device,
 }
 
 
-static int udevProcessSCSIHost(struct udev_device *device ATTRIBUTE_UNUSED,
-                               virNodeDeviceDefPtr def)
+static int
+udevProcessSCSIHost(struct udev_device *device ATTRIBUTE_UNUSED,
+                    virNodeDeviceDefPtr def)
 {
     virNodeDevCapSCSIHostPtr scsi_host = &def->caps->data.scsi_host;
     char *filename = NULL;
@@ -581,8 +720,9 @@ static int udevProcessSCSIHost(struct udev_device *device ATTRIBUTE_UNUSED,
 }
 
 
-static int udevProcessSCSITarget(struct udev_device *device ATTRIBUTE_UNUSED,
-                                 virNodeDeviceDefPtr def)
+static int
+udevProcessSCSITarget(struct udev_device *device,
+                      virNodeDeviceDefPtr def)
 {
     const char *sysname = NULL;
     virNodeDevCapSCSITargetPtr scsi_target = &def->caps->data.scsi_target;
@@ -592,6 +732,8 @@ static int udevProcessSCSITarget(struct udev_device *device ATTRIBUTE_UNUSED,
     if (VIR_STRDUP(scsi_target->name, sysname) < 0)
         return -1;
 
+    nodeDeviceSysfsGetSCSITargetCaps(def->sysfs_path, &def->caps->data.scsi_target);
+
     if (udevGenerateDeviceName(device, def, NULL) != 0)
         return -1;
 
@@ -599,8 +741,10 @@ static int udevProcessSCSITarget(struct udev_device *device ATTRIBUTE_UNUSED,
 }
 
 
-static int udevGetSCSIType(virNodeDeviceDefPtr def ATTRIBUTE_UNUSED,
-                           unsigned int type, char **typestring)
+static int
+udevGetSCSIType(virNodeDeviceDefPtr def ATTRIBUTE_UNUSED,
+                unsigned int type,
+                char **typestring)
 {
     int ret = 0;
     int foundtype = 1;
@@ -657,8 +801,9 @@ static int udevGetSCSIType(virNodeDeviceDefPtr def ATTRIBUTE_UNUSED,
 }
 
 
-static int udevProcessSCSIDevice(struct udev_device *device ATTRIBUTE_UNUSED,
-                                 virNodeDeviceDefPtr def)
+static int
+udevProcessSCSIDevice(struct udev_device *device ATTRIBUTE_UNUSED,
+                      virNodeDeviceDefPtr def)
 {
     int ret = -1;
     unsigned int tmp = 0;
@@ -700,8 +845,9 @@ static int udevProcessSCSIDevice(struct udev_device *device ATTRIBUTE_UNUSED,
 }
 
 
-static int udevProcessDisk(struct udev_device *device,
-                           virNodeDeviceDefPtr def)
+static int
+udevProcessDisk(struct udev_device *device,
+                virNodeDeviceDefPtr def)
 {
     virNodeDevCapStoragePtr storage = &def->caps->data.storage;
 
@@ -718,9 +864,10 @@ static int udevProcessDisk(struct udev_device *device,
 }
 
 
-static int udevProcessRemoveableMedia(struct udev_device *device,
-                                      virNodeDeviceDefPtr def,
-                                      int has_media)
+static int
+udevProcessRemoveableMedia(struct udev_device *device,
+                           virNodeDeviceDefPtr def,
+                           int has_media)
 {
     virNodeDevCapStoragePtr storage = &def->caps->data.storage;
     int is_removable = 0;
@@ -759,8 +906,10 @@ static int udevProcessRemoveableMedia(struct udev_device *device,
     return 0;
 }
 
-static int udevProcessCDROM(struct udev_device *device,
-                            virNodeDeviceDefPtr def)
+
+static int
+udevProcessCDROM(struct udev_device *device,
+                 virNodeDeviceDefPtr def)
 {
     int has_media = 0;
 
@@ -779,8 +928,10 @@ static int udevProcessCDROM(struct udev_device *device,
     return udevProcessRemoveableMedia(device, def, has_media);
 }
 
-static int udevProcessFloppy(struct udev_device *device,
-                             virNodeDeviceDefPtr def)
+
+static int
+udevProcessFloppy(struct udev_device *device,
+                  virNodeDeviceDefPtr def)
 {
     int has_media = 0;
 
@@ -797,8 +948,9 @@ static int udevProcessFloppy(struct udev_device *device,
 }
 
 
-static int udevProcessSD(struct udev_device *device,
-                         virNodeDeviceDefPtr def)
+static int
+udevProcessSD(struct udev_device *device,
+              virNodeDeviceDefPtr def)
 {
     virNodeDevCapStoragePtr storage = &def->caps->data.storage;
 
@@ -816,12 +968,12 @@ static int udevProcessSD(struct udev_device *device,
 }
 
 
-
 /* This function exists to deal with the case in which a driver does
  * not provide a device type in the usual place, but udev told us it's
  * a storage device, and we can make a good guess at what kind of
  * storage device it is from other information that is provided. */
-static int udevKludgeStorageType(virNodeDeviceDefPtr def)
+static int
+udevKludgeStorageType(virNodeDeviceDefPtr def)
 {
     VIR_DEBUG("Could not find definitive storage type for device "
               "with sysfs path '%s', trying to guess it",
@@ -842,8 +994,9 @@ static int udevKludgeStorageType(virNodeDeviceDefPtr def)
 }
 
 
-static int udevProcessStorage(struct udev_device *device,
-                              virNodeDeviceDefPtr def)
+static int
+udevProcessStorage(struct udev_device *device,
+                   virNodeDeviceDefPtr def)
 {
     virNodeDevCapStoragePtr storage = &def->caps->data.storage;
     int ret = -1;
@@ -938,6 +1091,7 @@ static int udevProcessStorage(struct udev_device *device,
     return ret;
 }
 
+
 static int
 udevProcessSCSIGeneric(struct udev_device *dev,
                        virNodeDeviceDefPtr def)
@@ -951,6 +1105,75 @@ udevProcessSCSIGeneric(struct udev_device *dev,
 
     return 0;
 }
+
+
+static int
+udevProcessMediatedDevice(struct udev_device *dev,
+                          virNodeDeviceDefPtr def)
+{
+    int ret = -1;
+    const char *uuidstr = NULL;
+    int iommugrp = -1;
+    char *linkpath = NULL;
+    char *canonicalpath = NULL;
+    virNodeDevCapMdevPtr data = &def->caps->data.mdev;
+
+    if (virAsprintf(&linkpath, "%s/mdev_type", udev_device_get_syspath(dev)) < 0)
+        goto cleanup;
+
+    if (virFileResolveLink(linkpath, &canonicalpath) < 0) {
+        virReportSystemError(errno, _("failed to resolve '%s'"), linkpath);
+        goto cleanup;
+    }
+
+    if (VIR_STRDUP(data->type, last_component(canonicalpath)) < 0)
+        goto cleanup;
+
+    uuidstr = udev_device_get_sysname(dev);
+    if ((iommugrp = virMediatedDeviceGetIOMMUGroupNum(uuidstr)) < 0)
+        goto cleanup;
+
+    if (udevGenerateDeviceName(dev, def, NULL) != 0)
+        goto cleanup;
+
+    data->iommuGroupNumber = iommugrp;
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(linkpath);
+    VIR_FREE(canonicalpath);
+    return ret;
+}
+
+
+static int
+udevProcessCCW(struct udev_device *device,
+               virNodeDeviceDefPtr def)
+{
+    int online;
+    char *p;
+    virNodeDevCapDataPtr data = &def->caps->data;
+
+    /* process only online devices to keep the list sane */
+    if (udevGetIntSysfsAttr(device, "online", &online, 0) < 0 || online != 1)
+        return -1;
+
+    if ((p = strrchr(def->sysfs_path, '/')) == NULL ||
+        virStrToLong_ui(p + 1, &p, 16, &data->ccw_dev.cssid) < 0 || p == NULL ||
+        virStrToLong_ui(p + 1, &p, 16, &data->ccw_dev.ssid) < 0 || p == NULL ||
+        virStrToLong_ui(p + 1, &p, 16, &data->ccw_dev.devno) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("failed to parse the CCW address from sysfs path: '%s'"),
+                       def->sysfs_path);
+        return -1;
+    }
+
+    if (udevGenerateDeviceName(device, def, NULL) != 0)
+        return -1;
+
+    return 0;
+}
+
 
 static int
 udevGetDeviceNodes(struct udev_device *device,
@@ -979,6 +1202,7 @@ udevGetDeviceNodes(struct udev_device *device,
 
     return 0;
 }
+
 
 static int
 udevGetDeviceType(struct udev_device *device,
@@ -1020,12 +1244,18 @@ udevGetDeviceType(struct udev_device *device,
         if (udevHasDeviceProperty(device, "INTERFACE"))
             *type = VIR_NODE_DEV_CAP_NET;
 
-        /* SCSI generic device doesn't set DEVTYPE property */
+        /* The following devices do not set the DEVTYPE property, therefore
+         * we need to rely on the SUBSYSTEM property */
         if (udevGetStringProperty(device, "SUBSYSTEM", &subsystem) < 0)
             return -1;
 
         if (STREQ_NULLABLE(subsystem, "scsi_generic"))
             *type = VIR_NODE_DEV_CAP_SCSI_GENERIC;
+        else if (STREQ_NULLABLE(subsystem, "mdev"))
+            *type = VIR_NODE_DEV_CAP_MDEV;
+        else if (STREQ_NULLABLE(subsystem, "ccw"))
+            *type = VIR_NODE_DEV_CAP_CCW_DEV;
+
         VIR_FREE(subsystem);
     }
 
@@ -1040,94 +1270,86 @@ udevGetDeviceType(struct udev_device *device,
 }
 
 
-static int udevGetDeviceDetails(struct udev_device *device,
-                                virNodeDeviceDefPtr def)
+static int
+udevGetDeviceDetails(struct udev_device *device,
+                     virNodeDeviceDefPtr def)
 {
-    int ret = 0;
-
     switch (def->caps->data.type) {
-    case VIR_NODE_DEV_CAP_SYSTEM:
-        /* There's no libudev equivalent of system, so ignore it. */
-        break;
     case VIR_NODE_DEV_CAP_PCI_DEV:
-        ret = udevProcessPCI(device, def);
-        break;
+        return udevProcessPCI(device, def);
     case VIR_NODE_DEV_CAP_USB_DEV:
-        ret = udevProcessUSBDevice(device, def);
-        break;
+        return udevProcessUSBDevice(device, def);
     case VIR_NODE_DEV_CAP_USB_INTERFACE:
-        ret = udevProcessUSBInterface(device, def);
-        break;
+        return udevProcessUSBInterface(device, def);
     case VIR_NODE_DEV_CAP_NET:
-        ret = udevProcessNetworkInterface(device, def);
-        break;
+        return udevProcessNetworkInterface(device, def);
     case VIR_NODE_DEV_CAP_SCSI_HOST:
-        ret = udevProcessSCSIHost(device, def);
-        break;
+        return udevProcessSCSIHost(device, def);
     case VIR_NODE_DEV_CAP_SCSI_TARGET:
-        ret = udevProcessSCSITarget(device, def);
-        break;
+        return udevProcessSCSITarget(device, def);
     case VIR_NODE_DEV_CAP_SCSI:
-        ret = udevProcessSCSIDevice(device, def);
-        break;
+        return udevProcessSCSIDevice(device, def);
     case VIR_NODE_DEV_CAP_STORAGE:
-        ret = udevProcessStorage(device, def);
-        break;
+        return udevProcessStorage(device, def);
     case VIR_NODE_DEV_CAP_SCSI_GENERIC:
-        ret = udevProcessSCSIGeneric(device, def);
-        break;
+        return udevProcessSCSIGeneric(device, def);
     case VIR_NODE_DEV_CAP_DRM:
-        ret = udevProcessDRMDevice(device, def);
-        break;
-    default:
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unknown device type %d"), def->caps->data.type);
-        ret = -1;
+        return udevProcessDRMDevice(device, def);
+    case VIR_NODE_DEV_CAP_MDEV:
+        return udevProcessMediatedDevice(device, def);
+    case VIR_NODE_DEV_CAP_CCW_DEV:
+        return udevProcessCCW(device, def);
+    case VIR_NODE_DEV_CAP_MDEV_TYPES:
+    case VIR_NODE_DEV_CAP_SYSTEM:
+    case VIR_NODE_DEV_CAP_FC_HOST:
+    case VIR_NODE_DEV_CAP_VPORTS:
+    case VIR_NODE_DEV_CAP_LAST:
         break;
     }
 
-    return ret;
+    return 0;
 }
 
 
-static int udevRemoveOneDevice(struct udev_device *device)
+static int
+udevRemoveOneDevice(struct udev_device *device)
 {
-    virNodeDeviceObjPtr dev = NULL;
+    virNodeDeviceObjPtr obj = NULL;
+    virNodeDeviceDefPtr def;
     virObjectEventPtr event = NULL;
     const char *name = NULL;
-    int ret = -1;
 
     name = udev_device_get_syspath(device);
-    dev = virNodeDeviceObjFindBySysfsPath(&driver->devs, name);
-
-    if (!dev) {
+    if (!(obj = virNodeDeviceObjListFindBySysfsPath(driver->devs, name))) {
         VIR_DEBUG("Failed to find device to remove that has udev name '%s'",
                   name);
-        goto cleanup;
+        return -1;
     }
+    def = virNodeDeviceObjGetDef(obj);
 
-    event = virNodeDeviceEventLifecycleNew(dev->def->name,
+    event = virNodeDeviceEventLifecycleNew(def->name,
                                            VIR_NODE_DEVICE_EVENT_DELETED,
                                            0);
 
     VIR_DEBUG("Removing device '%s' with sysfs path '%s'",
-              dev->def->name, name);
-    virNodeDeviceObjRemove(&driver->devs, &dev);
+              def->name, name);
+    virNodeDeviceObjListRemove(driver->devs, obj);
+    virObjectUnref(obj);
 
-    ret = 0;
- cleanup:
     if (event)
         virObjectEventStateQueue(driver->nodeDeviceEventState, event);
-    return ret;
+    return 0;
 }
 
 
-static int udevSetParent(struct udev_device *device,
-                         virNodeDeviceDefPtr def)
+static int
+udevSetParent(struct udev_device *device,
+              virNodeDeviceDefPtr def)
 {
     struct udev_device *parent_device = NULL;
     const char *parent_sysfs_path = NULL;
-    virNodeDeviceObjPtr dev = NULL;
+    virNodeDeviceObjPtr obj = NULL;
+    virNodeDeviceDefPtr objdef;
     int ret = -1;
 
     parent_device = device;
@@ -1145,14 +1367,14 @@ static int udevSetParent(struct udev_device *device,
             goto cleanup;
         }
 
-        dev = virNodeDeviceObjFindBySysfsPath(&driver->devs,
-                                              parent_sysfs_path);
-        if (dev != NULL) {
-            if (VIR_STRDUP(def->parent, dev->def->name) < 0) {
-                virNodeDeviceObjUnlock(dev);
+        if ((obj = virNodeDeviceObjListFindBySysfsPath(driver->devs,
+                                                       parent_sysfs_path))) {
+            objdef = virNodeDeviceObjGetDef(obj);
+            if (VIR_STRDUP(def->parent, objdef->name) < 0) {
+                virNodeDeviceObjEndAPI(&obj);
                 goto cleanup;
             }
-            virNodeDeviceObjUnlock(dev);
+            virNodeDeviceObjEndAPI(&obj);
 
             if (VIR_STRDUP(def->parent_sysfs_path, parent_sysfs_path) < 0)
                 goto cleanup;
@@ -1170,10 +1392,12 @@ static int udevSetParent(struct udev_device *device,
 }
 
 
-static int udevAddOneDevice(struct udev_device *device)
+static int
+udevAddOneDevice(struct udev_device *device)
 {
     virNodeDeviceDefPtr def = NULL;
-    virNodeDeviceObjPtr dev = NULL;
+    virNodeDeviceObjPtr obj = NULL;
+    virNodeDeviceDefPtr objdef;
     virObjectEventPtr event = NULL;
     bool new_device = true;
     int ret = -1;
@@ -1202,26 +1426,25 @@ static int udevAddOneDevice(struct udev_device *device)
     if (udevSetParent(device, def) != 0)
         goto cleanup;
 
-    dev = virNodeDeviceObjFindByName(&driver->devs, def->name);
-    if (dev) {
-        virNodeDeviceObjUnlock(dev);
+    if ((obj = virNodeDeviceObjListFindByName(driver->devs, def->name))) {
+        virNodeDeviceObjEndAPI(&obj);
         new_device = false;
     }
 
     /* If this is a device change, the old definition will be freed
      * and the current definition will take its place. */
-    dev = virNodeDeviceObjAssignDef(&driver->devs, def);
-    if (dev == NULL)
+    if (!(obj = virNodeDeviceObjListAssignDef(driver->devs, def)))
         goto cleanup;
+    objdef = virNodeDeviceObjGetDef(obj);
 
     if (new_device)
-        event = virNodeDeviceEventLifecycleNew(dev->def->name,
+        event = virNodeDeviceEventLifecycleNew(objdef->name,
                                                VIR_NODE_DEVICE_EVENT_CREATED,
                                                0);
     else
-        event = virNodeDeviceEventUpdateNew(dev->def->name);
+        event = virNodeDeviceEventUpdateNew(objdef->name);
 
-    virNodeDeviceObjUnlock(dev);
+    virNodeDeviceObjEndAPI(&obj);
 
     ret = 0;
 
@@ -1239,8 +1462,9 @@ static int udevAddOneDevice(struct udev_device *device)
 }
 
 
-static int udevProcessDeviceListEntry(struct udev *udev,
-                                      struct udev_list_entry *list_entry)
+static int
+udevProcessDeviceListEntry(struct udev *udev,
+                           struct udev_list_entry *list_entry)
 {
     struct udev_device *device;
     const char *name = NULL;
@@ -1272,7 +1496,8 @@ const char *subsystem_blacklist[] = {
     "acpi", "tty", "vc", "i2c",
 };
 
-static int udevEnumerateAddMatches(struct udev_enumerate *udev_enumerate)
+static int
+udevEnumerateAddMatches(struct udev_enumerate *udev_enumerate)
 {
     size_t i;
 
@@ -1287,7 +1512,8 @@ static int udevEnumerateAddMatches(struct udev_enumerate *udev_enumerate)
 }
 
 
-static int udevEnumerateDevices(struct udev *udev)
+static int
+udevEnumerateDevices(struct udev *udev)
 {
     struct udev_enumerate *udev_enumerate = NULL;
     struct udev_list_entry *list_entry = NULL;
@@ -1317,7 +1543,8 @@ static int udevEnumerateDevices(struct udev *udev)
 }
 
 
-static void udevPCITranslateDeinit(void)
+static void
+udevPCITranslateDeinit(void)
 {
 #if defined __s390__ || defined __s390x_
     /* Nothing was initialized, nothing needs to be cleaned up */
@@ -1329,7 +1556,8 @@ static void udevPCITranslateDeinit(void)
 }
 
 
-static int nodeStateCleanup(void)
+static int
+nodeStateCleanup(void)
 {
     udevPrivate *priv = NULL;
     struct udev_monitor *udev_monitor = NULL;
@@ -1359,7 +1587,7 @@ static int nodeStateCleanup(void)
     if (udev != NULL)
         udev_unref(udev);
 
-    virNodeDeviceObjListFree(&driver->devs);
+    virNodeDeviceObjListFree(driver->devs);
     nodeDeviceUnlock();
     virMutexDestroy(&driver->lock);
     VIR_FREE(driver);
@@ -1370,23 +1598,49 @@ static int nodeStateCleanup(void)
 }
 
 
-static void udevEventHandleCallback(int watch ATTRIBUTE_UNUSED,
-                                    int fd,
-                                    int events ATTRIBUTE_UNUSED,
-                                    void *data ATTRIBUTE_UNUSED)
+static int
+udevHandleOneDevice(struct udev_device *device)
+{
+    const char *action = udev_device_get_action(device);
+
+    VIR_DEBUG("udev action: '%s'", action);
+
+    if (STREQ(action, "add") || STREQ(action, "change"))
+        return udevAddOneDevice(device);
+
+    if (STREQ(action, "remove"))
+        return udevRemoveOneDevice(device);
+
+    return 0;
+}
+
+
+static void
+udevEventHandleCallback(int watch ATTRIBUTE_UNUSED,
+                        int fd,
+                        int events ATTRIBUTE_UNUSED,
+                        void *data ATTRIBUTE_UNUSED)
 {
     struct udev_device *device = NULL;
     struct udev_monitor *udev_monitor = DRV_STATE_UDEV_MONITOR(driver);
-    const char *action = NULL;
     int udev_fd = -1;
 
-    nodeDeviceLock();
     udev_fd = udev_monitor_get_fd(udev_monitor);
     if (fd != udev_fd) {
+        udevPrivate *priv = driver->privateData;
+
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("File descriptor returned by udev %d does not "
                          "match node device file descriptor %d"),
                        fd, udev_fd);
+
+        /* this is a non-recoverable error, let's remove the handle, so that we
+         * don't get in here again because of some spurious behaviour and report
+         * the same error multiple times
+         */
+        virEventRemoveHandle(priv->watch);
+        priv->watch = -1;
+
         goto cleanup;
     }
 
@@ -1397,22 +1651,10 @@ static void udevEventHandleCallback(int watch ATTRIBUTE_UNUSED,
         goto cleanup;
     }
 
-    action = udev_device_get_action(device);
-    VIR_DEBUG("udev action: '%s'", action);
-
-    if (STREQ(action, "add") || STREQ(action, "change")) {
-        udevAddOneDevice(device);
-        goto cleanup;
-    }
-
-    if (STREQ(action, "remove")) {
-        udevRemoveOneDevice(device);
-        goto cleanup;
-    }
+    udevHandleOneDevice(device);
 
  cleanup:
     udev_device_unref(device);
-    nodeDeviceUnlock();
     return;
 }
 
@@ -1474,10 +1716,11 @@ udevGetDMIData(virNodeDevCapSystemPtr syscap)
 #endif
 
 
-static int udevSetupSystemDev(void)
+static int
+udevSetupSystemDev(void)
 {
     virNodeDeviceDefPtr def = NULL;
-    virNodeDeviceObjPtr dev = NULL;
+    virNodeDeviceObjPtr obj = NULL;
     int ret = -1;
 
     if (VIR_ALLOC(def) < 0)
@@ -1493,11 +1736,10 @@ static int udevSetupSystemDev(void)
     udevGetDMIData(&def->caps->data.system);
 #endif
 
-    dev = virNodeDeviceObjAssignDef(&driver->devs, def);
-    if (dev == NULL)
+    if (!(obj = virNodeDeviceObjListAssignDef(driver->devs, def)))
         goto cleanup;
 
-    virNodeDeviceObjUnlock(dev);
+    virNodeDeviceObjEndAPI(&obj);
 
     ret = 0;
 
@@ -1508,7 +1750,9 @@ static int udevSetupSystemDev(void)
     return ret;
 }
 
-static int udevPCITranslateInit(bool privileged ATTRIBUTE_UNUSED)
+
+static int
+udevPCITranslateInit(bool privileged ATTRIBUTE_UNUSED)
 {
 #if defined __s390__ || defined __s390x_
     /* On s390(x) system there is no PCI bus.
@@ -1530,13 +1774,14 @@ static int udevPCITranslateInit(bool privileged ATTRIBUTE_UNUSED)
     return 0;
 }
 
-static int nodeStateInitialize(bool privileged,
-                               virStateInhibitCallback callback ATTRIBUTE_UNUSED,
-                               void *opaque ATTRIBUTE_UNUSED)
+
+static int
+nodeStateInitialize(bool privileged,
+                    virStateInhibitCallback callback ATTRIBUTE_UNUSED,
+                    void *opaque ATTRIBUTE_UNUSED)
 {
     udevPrivate *priv = NULL;
     struct udev *udev = NULL;
-    int ret = -1;
 
     if (VIR_ALLOC(priv) < 0)
         return -1;
@@ -1559,16 +1804,20 @@ static int nodeStateInitialize(bool privileged,
 
     driver->privateData = priv;
     nodeDeviceLock();
+
+    if (!(driver->devs = virNodeDeviceObjListNew()))
+        goto unlock;
+
     driver->nodeDeviceEventState = virObjectEventStateNew();
 
     if (udevPCITranslateInit(privileged) < 0)
-        goto cleanup;
+        goto unlock;
 
     udev = udev_new();
     if (!udev) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("failed to create udev context"));
-        goto cleanup;
+        goto unlock;
     }
 #if HAVE_UDEV_LOGGING
     /* cast to get rid of missing-format-attribute warning */
@@ -1579,10 +1828,19 @@ static int nodeStateInitialize(bool privileged,
     if (priv->udev_monitor == NULL) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("udev_monitor_new_from_netlink returned NULL"));
-        goto cleanup;
+        goto unlock;
     }
 
     udev_monitor_enable_receiving(priv->udev_monitor);
+
+#if HAVE_UDEV_MONITOR_SET_RECEIVE_BUFFER_SIZE
+    /* mimic udevd's behaviour and override the systems rmem_max limit in case
+     * there's a significant number of device 'add' events
+     */
+    if (geteuid() == 0)
+        udev_monitor_set_receive_buffer_size(priv->udev_monitor,
+                                             128 * 1024 * 1024);
+#endif
 
     /* We register the monitor with the event callback so we are
      * notified by udev of device changes before we enumerate existing
@@ -1596,29 +1854,32 @@ static int nodeStateInitialize(bool privileged,
                                     VIR_EVENT_HANDLE_READABLE,
                                     udevEventHandleCallback, NULL, NULL);
     if (priv->watch == -1)
-        goto cleanup;
+        goto unlock;
 
     /* Create a fictional 'computer' device to root the device tree. */
     if (udevSetupSystemDev() != 0)
-        goto cleanup;
+        goto unlock;
+
+    nodeDeviceUnlock();
 
     /* Populate with known devices */
-
     if (udevEnumerateDevices(udev) != 0)
         goto cleanup;
 
-    ret = 0;
+    return 0;
 
  cleanup:
-    nodeDeviceUnlock();
+    nodeStateCleanup();
+    return -1;
 
-    if (ret == -1)
-        nodeStateCleanup();
-    return ret;
+ unlock:
+    nodeDeviceUnlock();
+    goto cleanup;
 }
 
 
-static int nodeStateReload(void)
+static int
+nodeStateReload(void)
 {
     return 0;
 }
@@ -1648,7 +1909,9 @@ static virStateDriver udevStateDriver = {
     .stateReload = nodeStateReload, /* 0.7.3 */
 };
 
-int udevNodeRegister(void)
+
+int
+udevNodeRegister(void)
 {
     VIR_DEBUG("Registering udev node device backend");
 

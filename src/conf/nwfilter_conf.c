@@ -1852,7 +1852,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
                     switch (datatype) {
                         case DATATYPE_UINT8_HEX:
                             base = 16;
-                            /* fallthrough */
+                            ATTRIBUTE_FALLTHROUGH;
                         case DATATYPE_UINT8:
                             if (virStrToLong_ui(prop, NULL, base, &uint_val) >= 0) {
                                 if (uint_val <= 0xff) {
@@ -1869,7 +1869,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
 
                         case DATATYPE_UINT16_HEX:
                             base = 16;
-                            /* fallthrough */
+                            ATTRIBUTE_FALLTHROUGH;
                         case DATATYPE_UINT16:
                             if (virStrToLong_ui(prop, NULL, base, &uint_val) >= 0) {
                                 if (uint_val <= 0xffff) {
@@ -1886,7 +1886,7 @@ virNWFilterRuleDetailsParse(xmlNodePtr node,
 
                         case DATATYPE_UINT32_HEX:
                             base = 16;
-                            /* fallthrough */
+                            ATTRIBUTE_FALLTHROUGH;
                         case DATATYPE_UINT32:
                             if (virStrToLong_ui(prop, NULL, base, &uint_val) >= 0) {
                                 item->u.u32 = uint_val;
@@ -2120,7 +2120,7 @@ virNWFilterRuleValidate(virNWFilterRuleDefPtr rule)
         portData = &rule->p.ipHdrFilter.portData;
         protocol = "IP";
         dataProtocolID = &rule->p.ipHdrFilter.ipHdr.dataProtocolID;
-        /* fall through */
+        ATTRIBUTE_FALLTHROUGH;
     case VIR_NWFILTER_RULE_PROTOCOL_IPV6:
         if (portData == NULL) {
             portData = &rule->p.ipv6HdrFilter.portData;
@@ -2452,7 +2452,7 @@ virNWFilterRuleParse(xmlNodePtr node)
                 if (found)
                     i = found_i;
 
-                if (xmlStrEqual(cur->name, BAD_CAST virAttr[i].id)) {
+                if (virXMLNodeNameEqual(cur, virAttr[i].id)) {
 
                     found_i = i;
                     found = true;
@@ -2668,12 +2668,12 @@ virNWFilterDefParseXML(xmlXPathContextPtr ctxt)
             if (VIR_ALLOC(entry) < 0)
                 goto cleanup;
 
-            if (xmlStrEqual(curr->name, BAD_CAST "rule")) {
+            if (virXMLNodeNameEqual(curr, "rule")) {
                 if (!(entry->rule = virNWFilterRuleParse(curr))) {
                     virNWFilterEntryFree(entry);
                     goto cleanup;
                 }
-            } else if (xmlStrEqual(curr->name, BAD_CAST "filterref")) {
+            } else if (virXMLNodeNameEqual(curr, "filterref")) {
                 if (!(entry->include = virNWFilterIncludeParse(curr))) {
                     virNWFilterEntryFree(entry);
                     goto cleanup;
@@ -2767,23 +2767,19 @@ virNWFilterDefParseFile(const char *filename)
 
 
 int
-virNWFilterSaveXML(const char *configDir,
-                   virNWFilterDefPtr def,
-                   const char *xml)
+virNWFilterSaveConfig(const char *configDir,
+                      virNWFilterDefPtr def)
 {
+    int ret = -1;
+    char *xml;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
     char *configFile = NULL;
-    int ret = -1;
 
-    if ((configFile = virNWFilterConfigFile(configDir, def->name)) == NULL)
+    if (!(xml = virNWFilterDefFormat(def)))
         goto cleanup;
 
-    if (virFileMakePath(configDir) < 0) {
-        virReportSystemError(errno,
-                             _("cannot create config directory '%s'"),
-                             configDir);
+    if (!(configFile = virFileBuildPath(configDir, def->name, ".xml")))
         goto cleanup;
-    }
 
     virUUIDFormat(def->uuid, uuidstr);
     ret = virXMLSaveFile(configFile,
@@ -2792,25 +2788,6 @@ virNWFilterSaveXML(const char *configDir,
 
  cleanup:
     VIR_FREE(configFile);
-    return ret;
-}
-
-
-int
-virNWFilterSaveConfig(const char *configDir,
-                      virNWFilterDefPtr def)
-{
-    int ret = -1;
-    char *xml;
-
-    if (!(xml = virNWFilterDefFormat(def)))
-        goto cleanup;
-
-    if (virNWFilterSaveXML(configDir, def, xml) < 0)
-        goto cleanup;
-
-    ret = 0;
- cleanup:
     VIR_FREE(xml);
     return ret;
 }
@@ -2932,43 +2909,6 @@ virNWFilterTriggerVMFilterRebuild(void)
 
 
 int
-virNWFilterSaveDef(const char *configDir,
-                   virNWFilterDefPtr def)
-{
-    char uuidstr[VIR_UUID_STRING_BUFLEN];
-    char *xml;
-    int ret = -1;
-    char *configFile = NULL;
-
-    if (virFileMakePath(configDir) < 0) {
-        virReportSystemError(errno,
-                             _("cannot create config directory %s"),
-                             configDir);
-        goto error;
-    }
-
-    if (!(configFile = virFileBuildPath(configDir, def->name, ".xml")))
-        goto error;
-
-    if (!(xml = virNWFilterDefFormat(def))) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       "%s", _("failed to generate XML"));
-        goto error;
-    }
-
-    virUUIDFormat(def->uuid, uuidstr);
-    ret = virXMLSaveFile(configFile,
-                         virXMLPickShellSafeComment(def->name, uuidstr),
-                         "nwfilter-edit", xml);
-    VIR_FREE(xml);
-
- error:
-    VIR_FREE(configFile);
-    return ret;
-}
-
-
-int
 virNWFilterDeleteDef(const char *configDir,
                      virNWFilterDefPtr def)
 {
@@ -3074,7 +3014,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
 
                case DATATYPE_UINT8_HEX:
                    asHex = true;
-                   /* fallthrough */
+                   ATTRIBUTE_FALLTHROUGH;
                case DATATYPE_IPMASK:
                case DATATYPE_IPV6MASK:
                    /* display all masks in CIDR format */
@@ -3085,7 +3025,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
 
                case DATATYPE_UINT16_HEX:
                    asHex = true;
-                   /* fallthrough */
+                   ATTRIBUTE_FALLTHROUGH;
                case DATATYPE_UINT16:
                    virBufferAsprintf(buf, asHex ? "0x%x" : "%d",
                                      item->u.u16);
@@ -3093,7 +3033,7 @@ virNWFilterRuleDefDetailsFormat(virBufferPtr buf,
 
                case DATATYPE_UINT32_HEX:
                    asHex = true;
-                   /* fallthrough */
+                   ATTRIBUTE_FALLTHROUGH;
                case DATATYPE_UINT32:
                    virBufferAsprintf(buf, asHex ? "0x%x" : "%u",
                                      item->u.u32);
@@ -3233,17 +3173,6 @@ virNWFilterDefFormat(const virNWFilterDef *def)
  err_exit:
     virBufferFreeAndReset(&buf);
     return NULL;
-}
-
-
-char *
-virNWFilterConfigFile(const char *dir,
-                      const char *name)
-{
-    char *ret = NULL;
-
-    ignore_value(virAsprintf(&ret, "%s/%s.xml", dir, name));
-    return ret;
 }
 
 

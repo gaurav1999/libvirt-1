@@ -109,6 +109,9 @@ int virStrToDouble(char const *s,
                    double *result)
     ATTRIBUTE_RETURN_CHECK;
 
+int virDoubleToStr(char **strp, double number)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+
 void virSkipSpaces(const char **str) ATTRIBUTE_NONNULL(1);
 void virSkipSpacesAndBackslash(const char **str) ATTRIBUTE_NONNULL(1);
 void virTrimSpaces(char *str, char **endp) ATTRIBUTE_NONNULL(1);
@@ -274,12 +277,17 @@ ssize_t virStringSearch(const char *str,
                         char ***matches)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4);
 
+bool virStringMatch(const char *str,
+                    const char *regexp);
+
 char *virStringReplace(const char *haystack,
                        const char *oldneedle,
                        const char *newneedle)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
 
 void virStringStripIPv6Brackets(char *str);
+bool virStringHasChars(const char *str,
+                       const char *chars);
 bool virStringHasControlChars(const char *str);
 void virStringStripControlChars(char *str);
 
@@ -287,5 +295,11 @@ bool virStringIsPrintable(const char *str);
 bool virStringBufferIsPrintable(const uint8_t *buf, size_t buflen);
 
 char *virStringEncodeBase64(const uint8_t *buf, size_t buflen);
+
+void virStringTrimOptionalNewline(char *str);
+
+int virStringParsePort(const char *str,
+                       unsigned int *port)
+    ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
 
 #endif /* __VIR_STRING_H__ */

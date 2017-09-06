@@ -471,6 +471,7 @@ virStoragePoolDefParseSource(xmlXPathContextPtr ctxt,
                                    port);
                     goto cleanup;
                 }
+                VIR_FREE(port);
             }
         }
     }
@@ -703,12 +704,16 @@ virStoragePoolDefParseXML(xmlXPathContextPtr ctxt)
         if (virStoragePoolDefParseSource(ctxt, &ret->source, ret->type,
                                          source_node) < 0)
             goto error;
+    } else {
+        if (options->formatFromString)
+            ret->source.format = options->defaultFormat;
     }
 
     ret->name = virXPathString("string(./name)", ctxt);
     if (ret->name == NULL &&
-        options->flags & VIR_STORAGE_POOL_SOURCE_NAME)
-        ret->name = ret->source.name;
+        options->flags & VIR_STORAGE_POOL_SOURCE_NAME &&
+        VIR_STRDUP(ret->name, ret->source.name) < 0)
+        goto error;
     if (ret->name == NULL) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("missing pool source name element"));
@@ -818,7 +823,7 @@ virStoragePoolDefParseNode(xmlDocPtr xml,
     xmlXPathContextPtr ctxt = NULL;
     virStoragePoolDefPtr def = NULL;
 
-    if (!xmlStrEqual(root->name, BAD_CAST "pool")) {
+    if (!virXMLNodeNameEqual(root, "pool")) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("unexpected root element <%s>, "
                          "expecting <pool>"),
@@ -1063,7 +1068,7 @@ virStorageSize(const char *unit,
                const char *val,
                unsigned long long *ret)
 {
-    if (virStrToLong_ull(val, NULL, 10, ret) < 0) {
+    if (virStrToLong_ullp(val, NULL, 10, ret) < 0) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("malformed capacity element"));
         return -1;
@@ -1262,7 +1267,7 @@ virStorageVolDefParseNode(virStoragePoolDefPtr pool,
     xmlXPathContextPtr ctxt = NULL;
     virStorageVolDefPtr def = NULL;
 
-    if (!xmlStrEqual(root->name, BAD_CAST "volume")) {
+    if (!virXMLNodeNameEqual(root, "volume")) {
         virReportError(VIR_ERR_XML_ERROR,
                        _("unexpected root element <%s>, "
                          "expecting <volume>"),

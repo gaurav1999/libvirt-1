@@ -26,24 +26,8 @@
 typedef struct _virNWFilterObj virNWFilterObj;
 typedef virNWFilterObj *virNWFilterObjPtr;
 
-struct _virNWFilterObj {
-    virMutex lock;
-
-    int active;
-    int wantRemoved;
-
-    virNWFilterDefPtr def;
-    virNWFilterDefPtr newDef;
-};
-
-
 typedef struct _virNWFilterObjList virNWFilterObjList;
 typedef virNWFilterObjList *virNWFilterObjListPtr;
-struct _virNWFilterObjList {
-    size_t count;
-    virNWFilterObjPtr *objs;
-};
-
 
 typedef struct _virNWFilterDriverState virNWFilterDriverState;
 typedef virNWFilterDriverState *virNWFilterDriverStatePtr;
@@ -51,39 +35,75 @@ struct _virNWFilterDriverState {
     virMutex lock;
     bool privileged;
 
-    virNWFilterObjList nwfilters;
+    virNWFilterObjListPtr nwfilters;
 
     char *configDir;
     bool watchingFirewallD;
 };
 
+virNWFilterDefPtr
+virNWFilterObjGetDef(virNWFilterObjPtr obj);
+
+virNWFilterDefPtr
+virNWFilterObjGetNewDef(virNWFilterObjPtr obj);
+
+bool
+virNWFilterObjWantRemoved(virNWFilterObjPtr obj);
+
+virNWFilterObjListPtr
+virNWFilterObjListNew(void);
+
 void
 virNWFilterObjListFree(virNWFilterObjListPtr nwfilters);
 
 void
-virNWFilterObjRemove(virNWFilterObjListPtr nwfilters,
-                     virNWFilterObjPtr nwfilter);
-
-void virNWFilterObjFree(virNWFilterObjPtr obj);
+virNWFilterObjListRemove(virNWFilterObjListPtr nwfilters,
+                         virNWFilterObjPtr obj);
 
 virNWFilterObjPtr
-virNWFilterObjFindByUUID(virNWFilterObjListPtr nwfilters,
-                         const unsigned char *uuid);
+virNWFilterObjListFindByUUID(virNWFilterObjListPtr nwfilters,
+                             const unsigned char *uuid);
 
 virNWFilterObjPtr
-virNWFilterObjFindByName(virNWFilterObjListPtr nwfilters,
-                         const char *name);
+virNWFilterObjListFindByName(virNWFilterObjListPtr nwfilters,
+                             const char *name);
 
 virNWFilterObjPtr
-virNWFilterObjAssignDef(virNWFilterObjListPtr nwfilters,
-                        virNWFilterDefPtr def);
+virNWFilterObjListFindInstantiateFilter(virNWFilterObjListPtr nwfilters,
+                                        const char *filtername);
+
+virNWFilterObjPtr
+virNWFilterObjListAssignDef(virNWFilterObjListPtr nwfilters,
+                            virNWFilterDefPtr def);
 
 int
-virNWFilterObjTestUnassignDef(virNWFilterObjPtr nwfilter);
+virNWFilterObjTestUnassignDef(virNWFilterObjPtr obj);
+
+typedef bool
+(*virNWFilterObjListFilter)(virConnectPtr conn,
+                            virNWFilterDefPtr def);
 
 int
-virNWFilterObjLoadAllConfigs(virNWFilterObjListPtr nwfilters,
-                             const char *configDir);
+virNWFilterObjListNumOfNWFilters(virNWFilterObjListPtr nwfilters,
+                                 virConnectPtr conn,
+                                 virNWFilterObjListFilter filter);
+
+int
+virNWFilterObjListGetNames(virNWFilterObjListPtr nwfilters,
+                           virConnectPtr conn,
+                           virNWFilterObjListFilter filter,
+                           char **const names,
+                           int maxnames);
+
+int
+virNWFilterObjListExport(virConnectPtr conn,
+                         virNWFilterObjListPtr nwfilters,
+                         virNWFilterPtr **filters,
+                         virNWFilterObjListFilter filter);
+
+int
+virNWFilterObjListLoadAllConfigs(virNWFilterObjListPtr nwfilters,
+                                 const char *configDir);
 
 void
 virNWFilterObjLock(virNWFilterObjPtr obj);

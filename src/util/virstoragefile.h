@@ -155,7 +155,7 @@ typedef struct _virStorageNetHostDef virStorageNetHostDef;
 typedef virStorageNetHostDef *virStorageNetHostDefPtr;
 struct _virStorageNetHostDef {
     char *name;
-    char *port;
+    unsigned int port;
     int transport; /* virStorageNetHostTransport */
     char *socket;  /* path to unix socket */
 };
@@ -276,6 +276,10 @@ struct _virStorageSource {
     /* Name of the child backing store recorded in metadata of the
      * current file.  */
     char *backingStoreRaw;
+
+    /* metadata that allows identifying given storage source */
+    char *nodeformat;  /* name of the format handler object */
+    char *nodestorage; /* name of the storage object */
 };
 
 
@@ -289,7 +293,7 @@ int virStorageFileGetMetadataInternal(virStorageSourcePtr meta,
                                       char *buf,
                                       size_t len,
                                       int *backingFormat)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(4);
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 virStorageSourcePtr virStorageFileGetMetadataFromFD(const char *path,
                                                     int fd,
@@ -309,6 +313,11 @@ int virStorageFileParseChainIndex(const char *diskTarget,
                                   unsigned int *chainIndex)
     ATTRIBUTE_NONNULL(3);
 
+int virStorageFileParseBackingStoreStr(const char *str,
+                                       char **target,
+                                       unsigned int *chainIndex)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+
 virStorageSourcePtr virStorageFileChainLookup(virStorageSourcePtr chain,
                                               virStorageSourcePtr startFrom,
                                               const char *name,
@@ -323,6 +332,7 @@ int virStorageFileResize(const char *path,
 
 int virStorageFileIsClusterFS(const char *path);
 bool virStorageIsFile(const char *path);
+bool virStorageIsRelative(const char *backing);
 
 int virStorageFileGetLVMKey(const char *path,
                             char **key);
@@ -389,5 +399,15 @@ int virStorageFileCheckCompat(const char *compat);
 virStorageSourcePtr virStorageSourceNewFromBackingAbsolute(const char *path);
 
 bool virStorageSourceIsRelative(virStorageSourcePtr src);
+
+virStorageSourcePtr
+virStorageSourceFindByNodeName(virStorageSourcePtr top,
+                               const char *nodeName,
+                               unsigned int *index)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
+void
+virStorageSourceNetworkAssignDefaultPorts(virStorageSourcePtr src)
+    ATTRIBUTE_NONNULL(1);
 
 #endif /* __VIR_STORAGE_FILE_H__ */

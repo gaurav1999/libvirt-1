@@ -27,6 +27,7 @@
 # include "viralloc.h"
 # include "virfile.h"
 # include "virstring.h"
+# include "virjson.h"
 # include "capabilities.h"
 # include "domain_conf.h"
 
@@ -52,6 +53,11 @@ int virTestRun(const char *title,
                int (*body)(const void *data),
                const void *data);
 int virTestLoadFile(const char *file, char **buf);
+char *virTestLoadFilePath(const char *p, ...)
+    ATTRIBUTE_SENTINEL;
+virJSONValuePtr virTestLoadFileJSON(const char *p, ...)
+    ATTRIBUTE_SENTINEL;
+
 int virTestCaptureProgramOutput(const char *const argv[], char **buf, int maxlen);
 
 void virTestClearCommandPath(char *cmdset);
@@ -77,6 +83,8 @@ int virTestCompareToFile(const char *strcontent,
                          const char *filename);
 int virTestCompareToString(const char *strcontent,
                            const char *strsrc);
+int virTestCompareToULL(unsigned long long content,
+                        unsigned long long src);
 
 unsigned int virTestGetDebug(void);
 unsigned int virTestGetVerbose(void);
@@ -108,12 +116,12 @@ int virTestMain(int argc,
                 ...);
 
 /* Setup, then call func() */
-# define VIRT_TEST_MAIN(func)                           \
+# define VIR_TEST_MAIN(func)                            \
     int main(int argc, char **argv) {                   \
         return virTestMain(argc, argv, func, NULL);     \
     }
 
-# define VIRT_TEST_PRELOAD(lib)                                         \
+# define VIR_TEST_PRELOAD(lib)                                          \
     do {                                                                \
         const char *preload = getenv("LD_PRELOAD");                     \
         if (preload == NULL || strstr(preload, lib) == NULL) {          \
@@ -133,7 +141,7 @@ int virTestMain(int argc,
         }                                                               \
     } while (0)
 
-# define VIRT_TEST_MAIN_PRELOAD(func, ...)                              \
+# define VIR_TEST_MAIN_PRELOAD(func, ...)                               \
     int main(int argc, char **argv) {                                   \
         return virTestMain(argc, argv, func, __VA_ARGS__, NULL);        \
     }

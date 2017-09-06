@@ -88,6 +88,25 @@ virBufferAdjustIndent(virBufferPtr buf, int indent)
     buf->indent += indent;
 }
 
+
+/**
+ * virBufferSetIndent:
+ * @buf: the buffer
+ * @indent: new indentation size.
+ *
+ * Set the auto-indent value to @indent. See virBufferAdjustIndent on how auto
+ * indentation is applied.
+ */
+void
+virBufferSetIndent(virBufferPtr buf, int indent)
+{
+    if (!buf || buf->error)
+        return;
+
+    buf->indent = indent;
+}
+
+
 /**
  * virBufferGetIndent:
  * @buf: the buffer
@@ -537,6 +556,25 @@ virBufferEscapeSexpr(virBufferPtr buf,
 }
 
 /**
+ * virBufferEscapeRegex:
+ * @buf: the buffer to append to
+ * @format: a printf like format string but with only one %s parameter
+ * @str: the string argument which needs to be escaped
+ *
+ * Do a formatted print with a single string to a buffer.  The @str is
+ * escaped to avoid using POSIX extended regular expression meta-characters.
+ * Escaping is not applied to characters specified in @format. Auto
+ * indentation may be applied.
+ */
+void
+virBufferEscapeRegex(virBufferPtr buf,
+                     const char *format,
+                     const char *str)
+{
+    virBufferEscape(buf, '\\', "^$.|?*+()[]{}\\", format, str);
+}
+
+/**
  * virBufferEscape:
  * @buf: the buffer to append to
  * @escape: the escape character to inject
@@ -793,6 +831,26 @@ virBufferEscapeShell(virBufferPtr buf, const char *str)
 }
 
 /**
+ * virBufferStrcatVArgs:
+ * @buf: the buffer to append to
+ * @ap: variable argument structure
+ *
+ * See virBufferStrcat.
+ */
+void
+virBufferStrcatVArgs(virBufferPtr buf,
+                     va_list ap)
+{
+    char *str;
+
+    if (buf->error)
+        return;
+
+    while ((str = va_arg(ap, char *)) != NULL)
+        virBufferAdd(buf, str, -1);
+}
+
+/**
  * virBufferStrcat:
  * @buf: the buffer to append to
  * @...: the variable list of strings, the last argument must be NULL
@@ -804,14 +862,9 @@ void
 virBufferStrcat(virBufferPtr buf, ...)
 {
     va_list ap;
-    char *str;
-
-    if (buf->error)
-        return;
 
     va_start(ap, buf);
-    while ((str = va_arg(ap, char *)) != NULL)
-        virBufferAdd(buf, str, -1);
+    virBufferStrcatVArgs(buf, ap);
     va_end(ap);
 }
 

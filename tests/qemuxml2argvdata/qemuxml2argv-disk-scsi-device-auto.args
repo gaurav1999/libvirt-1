@@ -4,7 +4,7 @@ HOME=/home/test \
 USER=test \
 LOGNAME=test \
 QEMU_AUDIO_DRV=none \
-/usr/bin/qemu \
+/usr/bin/qemu-system-i686 \
 -name QEMUGuest1 \
 -S \
 -M pc \
@@ -14,7 +14,9 @@ QEMU_AUDIO_DRV=none \
 -nographic \
 -nodefconfig \
 -nodefaults \
--monitor unix:/tmp/lib/domain--1-QEMUGuest1/monitor.sock,server,nowait \
+-chardev socket,id=charmonitor,path=/tmp/lib/domain--1-QEMUGuest1/monitor.sock,\
+server,nowait \
+-mon chardev=charmonitor,id=monitor,mode=readline \
 -no-acpi \
 -boot c \
 -device lsi,id=scsi0,bus=pci.0,addr=0x3 \

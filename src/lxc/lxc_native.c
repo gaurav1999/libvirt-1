@@ -394,7 +394,7 @@ lxcCreateNetDef(const char *type,
 static virDomainHostdevDefPtr
 lxcCreateHostdevDef(int mode, int type, const char *data)
 {
-    virDomainHostdevDefPtr hostdev = virDomainHostdevDefAlloc(NULL);
+    virDomainHostdevDefPtr hostdev = virDomainHostdevDefNew(NULL);
 
     if (!hostdev)
         return NULL;
@@ -1000,7 +1000,7 @@ lxcParseConfigString(const char *config,
     virConfPtr properties = NULL;
     virConfValuePtr value;
 
-    if (!(properties = virConfReadMem(config, 0, VIR_CONF_FLAG_LXC_FORMAT)))
+    if (!(properties = virConfReadString(config, VIR_CONF_FLAG_LXC_FORMAT)))
         return NULL;
 
     if (!(vmdef = virDomainDefNew()))

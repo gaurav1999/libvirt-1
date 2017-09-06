@@ -30,6 +30,7 @@
 # include "virarch.h"
 # include "virmacaddr.h"
 # include "virobject.h"
+# include "virresctrl.h"
 
 # include <libxml/xpath.h>
 
@@ -138,6 +139,18 @@ struct _virCapsHostSecModel {
     virCapsHostSecModelLabelPtr labels;
 };
 
+typedef struct _virCapsHostCacheBank virCapsHostCacheBank;
+typedef virCapsHostCacheBank *virCapsHostCacheBankPtr;
+struct _virCapsHostCacheBank {
+    unsigned int id;
+    unsigned int level; /* 1=L1, 2=L2, 3=L3, etc. */
+    unsigned long long size; /* B */
+    virCacheType type;  /* Data, Instruction or Unified */
+    virBitmapPtr cpus;  /* All CPUs that share this bank */
+    size_t ncontrols;
+    virResctrlInfoPtr *controls;
+};
+
 typedef struct _virCapsHost virCapsHost;
 typedef virCapsHost *virCapsHostPtr;
 struct _virCapsHost {
@@ -156,6 +169,9 @@ struct _virCapsHost {
     size_t nnumaCell;
     size_t nnumaCell_max;
     virCapsHostNUMACellPtr *numaCell;
+
+    size_t ncaches;
+    virCapsHostCacheBankPtr *caches;
 
     size_t nsecModels;
     virCapsHostSecModelPtr secModels;
@@ -248,6 +264,9 @@ void
 virCapabilitiesFreeMachines(virCapsGuestMachinePtr *machines,
                             int nmachines);
 
+void
+virCapabilitiesFreeGuest(virCapsGuestPtr guest);
+
 virCapsGuestPtr
 virCapabilitiesAddGuest(virCapsPtr caps,
                         int ostype,
@@ -293,5 +312,17 @@ virCapabilitiesFormatXML(virCapsPtr caps);
 
 virBitmapPtr virCapabilitiesGetCpusForNodemask(virCapsPtr caps,
                                                virBitmapPtr nodemask);
+
+int virCapabilitiesGetNodeInfo(virNodeInfoPtr nodeinfo);
+
+int virCapabilitiesInitPages(virCapsPtr caps);
+
+int virCapabilitiesInitNUMA(virCapsPtr caps);
+
+bool virCapsHostCacheBankEquals(virCapsHostCacheBankPtr a,
+                                virCapsHostCacheBankPtr b);
+void virCapsHostCacheBankFree(virCapsHostCacheBankPtr ptr);
+
+int virCapabilitiesInitCaches(virCapsPtr caps);
 
 #endif /* __VIR_CAPABILITIES_H */

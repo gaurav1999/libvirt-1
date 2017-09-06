@@ -95,7 +95,7 @@ static const char testStatusXMLPrefixFooter[] =
 "    <device alias='net0'/>\n"
 "    <device alias='usb'/>\n"
 "  </devices>\n"
-"  <numad nodeset='0-2'/>\n"
+"  <numad nodeset='0-2' cpuset='1,3'/>\n"
 "  <libDir path='/tmp'/>\n"
 "  <channelTargetDir path='/tmp/channel'/>\n";
 
@@ -254,14 +254,10 @@ testInfoSet(struct testInfo *info,
     if (!(info->qemuCaps = virQEMUCapsNew()))
         goto error;
 
-    virQEMUCapsSetList(info->qemuCaps,
-                       QEMU_CAPS_LAST);
-
     if (testQemuCapsSetGIC(info->qemuCaps, gic) < 0)
         goto error;
 
-    if (qemuTestCapsCacheInsert(driver.qemuCapsCache, name,
-                                info->qemuCaps) < 0)
+    if (qemuTestCapsCacheInsert(driver.qemuCapsCache, info->qemuCaps) < 0)
         goto error;
 
     if (virAsprintf(&info->inName, "%s/qemuxml2argvdata/qemuxml2argv-%s.xml",
@@ -307,13 +303,27 @@ testInfoSet(struct testInfo *info,
     return -1;
 }
 
+# define FAKEROOTDIRTEMPLATE abs_builddir "/fakerootdir-XXXXXX"
 
 static int
 mymain(void)
 {
     int ret = 0;
+    char *fakerootdir;
     struct testInfo info;
     virQEMUDriverConfigPtr cfg = NULL;
+
+    if (VIR_STRDUP_QUIET(fakerootdir, FAKEROOTDIRTEMPLATE) < 0) {
+        fprintf(stderr, "Out of memory\n");
+        abort();
+    }
+
+    if (!mkdtemp(fakerootdir)) {
+        fprintf(stderr, "Cannot create fakerootdir");
+        abort();
+    }
+
+    setenv("LIBVIRT_FAKE_ROOT_DIR", fakerootdir, 1);
 
     memset(&info, 0, sizeof(info));
 
@@ -366,6 +376,7 @@ mymain(void)
     DO_TEST("minimal", NONE);
     DO_TEST("machine-core-on", NONE);
     DO_TEST("machine-core-off", NONE);
+    DO_TEST("machine-loadparm-multiple-disks-nets-s390", NONE);
     DO_TEST("default-kvm-host-arch", NONE);
     DO_TEST("default-qemu-host-arch", NONE);
     DO_TEST("boot-cdrom", NONE);
@@ -419,7 +430,13 @@ mymain(void)
     DO_TEST("hugepages-pages", NONE);
     DO_TEST("hugepages-pages2", NONE);
     DO_TEST("hugepages-pages3", NONE);
+    DO_TEST("hugepages-pages4", NONE);
+    DO_TEST("hugepages-pages5", NONE);
+    DO_TEST("hugepages-pages6", NONE);
+    DO_TEST("hugepages-pages7", NONE);
     DO_TEST("hugepages-shared", NONE);
+    DO_TEST("hugepages-memaccess", NONE);
+    DO_TEST("hugepages-memaccess2", NONE);
     DO_TEST("nosharepages", NONE);
     DO_TEST("restore-v2", NONE);
     DO_TEST("migrate", NONE);
@@ -521,7 +538,7 @@ mymain(void)
     DO_TEST("net-eth-ifname", NONE);
     DO_TEST("net-eth-hostip", NONE);
     DO_TEST("net-virtio-network-portgroup", NONE);
-    DO_TEST("net-virtio-rxqueuesize", NONE);
+    DO_TEST("net-virtio-rxtxqueuesize", NONE);
     DO_TEST("net-hostdev", NONE);
     DO_TEST("net-hostdev-vfio", NONE);
     DO_TEST("net-midonet", NONE);
@@ -532,21 +549,12 @@ mymain(void)
     DO_TEST("net-bandwidth", NONE);
     DO_TEST("net-bandwidth2", NONE);
     DO_TEST("net-mtu", NONE);
+    DO_TEST("net-coalesce", NONE);
 
-    DO_TEST("serial-vc", NONE);
-    DO_TEST("serial-pty", NONE);
-    DO_TEST("serial-dev", NONE);
-    DO_TEST("serial-file", NONE);
-    DO_TEST("serial-unix", NONE);
-    DO_TEST("serial-tcp", NONE);
-    DO_TEST("serial-udp", NONE);
-    DO_TEST("serial-tcp-telnet", NONE);
     DO_TEST("serial-tcp-tlsx509-chardev", NONE);
     DO_TEST("serial-tcp-tlsx509-chardev-notls", NONE);
-    DO_TEST("serial-many", NONE);
     DO_TEST("serial-spiceport", NONE);
     DO_TEST("serial-spiceport-nospice", NONE);
-    DO_TEST("parallel-tcp", NONE);
     DO_TEST("console-compat", NONE);
     DO_TEST("console-compat2", NONE);
     DO_TEST("console-virtio-many", NONE);
@@ -554,9 +562,12 @@ mymain(void)
     DO_TEST("channel-virtio", NONE);
     DO_TEST("channel-virtio-state", NONE);
 
+    DO_TEST_FULL("channel-unix-source-path", WHEN_INACTIVE, GIC_NONE, NONE);
+
     DO_TEST("hostdev-usb-address", NONE);
     DO_TEST("hostdev-pci-address", NONE);
     DO_TEST("hostdev-vfio", NONE);
+    DO_TEST("hostdev-mdev-precreated", NONE);
     DO_TEST("pci-rom", NONE);
     DO_TEST("pci-serial-dev-chardev", NONE);
 
@@ -655,6 +666,48 @@ mymain(void)
     DO_TEST("pseries-nvram", NONE);
     DO_TEST("pseries-panic-missing", NONE);
     DO_TEST("pseries-panic-no-address", NONE);
+
+    DO_TEST("pseries-phb-simple",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
+    DO_TEST("pseries-phb-default-missing",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
+    DO_TEST("pseries-phb-numa-node",
+            QEMU_CAPS_NUMA,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+            QEMU_CAPS_SPAPR_PCI_HOST_BRIDGE_NUMA_NODE);
+
+    DO_TEST("pseries-many-devices",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+            QEMU_CAPS_VIRTIO_SCSI);
+    DO_TEST("pseries-many-buses-1",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+            QEMU_CAPS_VIRTIO_SCSI);
+    DO_TEST("pseries-many-buses-2",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+            QEMU_CAPS_VIRTIO_SCSI);
+    DO_TEST("pseries-hostdevs-1",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+            QEMU_CAPS_HOST_PCI_MULTIDOMAIN,
+            QEMU_CAPS_VIRTIO_SCSI,
+            QEMU_CAPS_DEVICE_VFIO_PCI);
+    DO_TEST("pseries-hostdevs-2",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+            QEMU_CAPS_HOST_PCI_MULTIDOMAIN,
+            QEMU_CAPS_VIRTIO_SCSI,
+            QEMU_CAPS_DEVICE_VFIO_PCI);
+    DO_TEST("pseries-hostdevs-3",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+            QEMU_CAPS_HOST_PCI_MULTIDOMAIN,
+            QEMU_CAPS_VIRTIO_SCSI,
+            QEMU_CAPS_DEVICE_VFIO_PCI);
 
     DO_TEST("balloon-device-auto", NONE);
     DO_TEST("balloon-device-period", NONE);
@@ -1067,11 +1120,30 @@ mymain(void)
             QEMU_CAPS_DEVICE_PCI_BRIDGE, QEMU_CAPS_DEVICE_IOH3420,
             QEMU_CAPS_PCI_MULTIFUNCTION, QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
             QEMU_CAPS_DEVICE_VIRTIO_GPU, QEMU_CAPS_BOOTINDEX);
+    DO_TEST("aarch64-pci-serial",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_DEVICE_PCI_SERIAL,
+            QEMU_CAPS_CHARDEV_LOGFILE,
+            QEMU_CAPS_OBJECT_GPEX,
+            QEMU_CAPS_DEVICE_PCI_BRIDGE,
+            QEMU_CAPS_DEVICE_DMI_TO_PCI_BRIDGE,
+            QEMU_CAPS_DEVICE_PCIE_ROOT_PORT);
+    DO_TEST("aarch64-video-default",
+            QEMU_CAPS_NODEFCONFIG,
+            QEMU_CAPS_OBJECT_GPEX,
+            QEMU_CAPS_DEVICE_PCI_BRIDGE,
+            QEMU_CAPS_DEVICE_IOH3420,
+            QEMU_CAPS_PCI_MULTIFUNCTION,
+            QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
+            QEMU_CAPS_DEVICE_VIRTIO_GPU,
+            QEMU_CAPS_DEVICE_DMI_TO_PCI_BRIDGE,
+            QEMU_CAPS_VNC);
 
     DO_TEST_FULL("aarch64-gic-none", WHEN_BOTH, GIC_NONE, NONE);
     DO_TEST_FULL("aarch64-gic-none-v2", WHEN_BOTH, GIC_V2, NONE);
     DO_TEST_FULL("aarch64-gic-none-v3", WHEN_BOTH, GIC_V3, NONE);
     DO_TEST_FULL("aarch64-gic-none-both", WHEN_BOTH, GIC_BOTH, NONE);
+    DO_TEST_FULL("aarch64-gic-none-tcg", WHEN_BOTH, GIC_BOTH, NONE);
     DO_TEST_FULL("aarch64-gic-default", WHEN_BOTH, GIC_NONE, NONE);
     DO_TEST_FULL("aarch64-gic-default", WHEN_BOTH, GIC_V2, NONE);
     DO_TEST_FULL("aarch64-gic-default", WHEN_BOTH, GIC_V3, NONE);
@@ -1105,6 +1177,7 @@ mymain(void)
 
     DO_TEST("memorybacking-set", NONE);
     DO_TEST("memorybacking-unset", NONE);
+    DO_TEST("virtio-options", QEMU_CAPS_VIRTIO_SCSI);
 
     virObjectUnref(cfg);
 
@@ -1124,6 +1197,10 @@ mymain(void)
     DO_TEST("intel-iommu-machine",
             QEMU_CAPS_MACHINE_OPT,
             QEMU_CAPS_MACHINE_IOMMU);
+    DO_TEST("intel-iommu-ioapic", NONE);
+    DO_TEST("intel-iommu-caching-mode", NONE);
+    DO_TEST("intel-iommu-eim", NONE);
+    DO_TEST("intel-iommu-device-iotlb", NONE);
 
     DO_TEST("cpu-check-none", NONE);
     DO_TEST("cpu-check-partial", NONE);
@@ -1133,12 +1210,23 @@ mymain(void)
     DO_TEST("cpu-check-default-partial", NONE);
     DO_TEST("cpu-check-default-partial2", NONE);
 
+    DO_TEST("smartcard-host", NONE);
+    DO_TEST("smartcard-host-certificates", NONE);
+    DO_TEST("smartcard-passthrough-tcp", NONE);
+    DO_TEST("smartcard-passthrough-spicevmc", NONE);
+    DO_TEST("smartcard-controller", NONE);
+
+    if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
+        virFileDeleteTree(fakerootdir);
+
     qemuTestDriverFree(&driver);
+    VIR_FREE(fakerootdir);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/qemuxml2xmlmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain,
+                      abs_builddir "/.libs/virpcimock.so")
 
 #else
 

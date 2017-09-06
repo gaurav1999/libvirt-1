@@ -90,11 +90,18 @@ int virStorageBackendDeleteLocal(virConnectPtr conn,
                                  virStoragePoolObjPtr pool,
                                  unsigned int flags);
 
+int
+virStorageBackendRefreshVolTargetUpdate(virStorageVolDefPtr vol);
+
 int virStorageBackendRefreshLocal(virConnectPtr conn,
                                   virStoragePoolObjPtr pool);
 
+int virStorageUtilGlusterExtractPoolSources(const char *host,
+                                            const char *xml,
+                                            virStoragePoolSourceListPtr list,
+                                            virStoragePoolType pooltype);
 int virStorageBackendFindGlusterPoolSources(const char *host,
-                                            int pooltype,
+                                            virStoragePoolType pooltype,
                                             virStoragePoolSourceListPtr list,
                                             bool report);
 
@@ -134,7 +141,7 @@ int virStorageBackendVolOpen(const char *path, struct stat *sb,
     ATTRIBUTE_RETURN_CHECK
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-# define VIR_STORAGE_DEFAULT_POOL_PERM_MODE 0755
+# define VIR_STORAGE_DEFAULT_POOL_PERM_MODE 0711
 # define VIR_STORAGE_DEFAULT_VOL_PERM_MODE  0600
 
 int virStorageBackendUpdateVolInfo(virStorageVolDefPtr vol,
@@ -162,5 +169,9 @@ virStorageBackendCreateQemuImgCmdFromVol(virConnectPtr conn,
 
 int virStorageBackendSCSIFindLUs(virStoragePoolObjPtr pool,
                                  uint32_t scanhost);
+
+int
+virStorageBackendZeroPartitionTable(const char *path,
+                                    unsigned long long size);
 
 #endif /* __VIR_STORAGE_UTIL_H__ */

@@ -117,38 +117,7 @@ fillAllCaps(virDomainCapsPtr domCaps)
 
 #if WITH_QEMU
 # include "testutilsqemu.h"
-
-static virCPUDef aarch64Cpu = {
-    .sockets = 1,
-    .cores = 1,
-    .threads = 1,
-};
-
-static virCPUDef ppc64leCpu = {
-    .type = VIR_CPU_TYPE_HOST,
-    .arch = VIR_ARCH_PPC64LE,
-    .model = (char *) "POWER8",
-    .sockets = 1,
-    .cores = 1,
-    .threads = 1,
-};
-
-static virCPUDef x86Cpu = {
-    .type = VIR_CPU_TYPE_HOST,
-    .arch = VIR_ARCH_X86_64,
-    .model = (char *) "Broadwell",
-    .sockets = 1,
-    .cores = 1,
-    .threads = 1,
-};
-
-static virCPUDef s390Cpu = {
-    .type = VIR_CPU_TYPE_HOST,
-    .arch = VIR_ARCH_S390X,
-    .sockets = 1,
-    .cores = 1,
-    .threads = 1,
-};
+# include "testutilshostcpus.h"
 
 static int
 fakeHostCPU(virCapsPtr caps,
@@ -156,32 +125,14 @@ fakeHostCPU(virCapsPtr caps,
 {
     virCPUDefPtr cpu;
 
-    switch (arch) {
-    case VIR_ARCH_AARCH64:
-        cpu = &aarch64Cpu;
-        break;
-
-    case VIR_ARCH_PPC64LE:
-        cpu = &ppc64leCpu;
-        break;
-
-    case VIR_ARCH_X86_64:
-        cpu = &x86Cpu;
-        break;
-
-    case VIR_ARCH_S390X:
-        cpu = &s390Cpu;
-        break;
-
-    default:
+    if (!(cpu = testUtilsHostCpusGetDefForArch(arch))) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        "cannot fake host CPU for arch %s",
                        virArchToString(arch));
         return -1;
     }
 
-    if (!(caps->host.cpu = virCPUDefCopy(cpu)))
-        return -1;
+    qemuTestSetHostCPU(caps, cpu);
 
     return 0;
 }
@@ -240,6 +191,7 @@ fillQemuCaps(virDomainCapsPtr domCaps,
 
     if (fillStringValues(&loader->values,
                          "/usr/share/AAVMF/AAVMF_CODE.fd",
+                         "/usr/share/AAVMF/AAVMF32_CODE.fd",
                          "/usr/share/OVMF/OVMF_CODE.fd",
                          NULL) < 0)
         goto cleanup;
@@ -283,12 +235,37 @@ fillXenCaps(virDomainCapsPtr domCaps)
 }
 #endif /* WITH_LIBXL */
 
+#ifdef WITH_BHYVE
+# include "bhyve/bhyve_capabilities.h"
+
+static int
+fillBhyveCaps(virDomainCapsPtr domCaps, unsigned int *bhyve_caps)
+{
+    virDomainCapsStringValuesPtr firmwares = NULL;
+    int ret = -1;
+
+    if (VIR_ALLOC(firmwares) < 0)
+        return -1;
+
+    if (fillStringValues(firmwares, "/foo/bar", "/foo/baz", NULL) < 0)
+        goto cleanup;
+
+    if (virBhyveDomainCapsFill(domCaps, *bhyve_caps, firmwares) < 0)
+        goto cleanup;
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(firmwares);
+    return ret;
+}
+#endif /* WITH_BHYVE */
 
 enum testCapsType {
     CAPS_NONE,
     CAPS_ALL,
     CAPS_QEMU,
     CAPS_LIBXL,
+    CAPS_BHYVE,
 };
 
 struct testData {
@@ -343,6 +320,12 @@ test_virDomainCapsFormat(const void *opaque)
             goto cleanup;
 #endif
         break;
+    case CAPS_BHYVE:
+#if WITH_BHYVE
+        if (fillBhyveCaps(domCaps, data->capsOpaque) < 0)
+            goto cleanup;
+#endif
+        break;
     }
 
     if (!(domCapsXML = virDomainCapsFormat(domCaps)))
@@ -363,6 +346,10 @@ static int
 mymain(void)
 {
     int ret = 0;
+
+#if WITH_BHYVE
+    unsigned int bhyve_caps = 0;
+#endif
 
 #if WITH_QEMU
     virQEMUDriverConfigPtr cfg = virQEMUDriverConfigNew(false);
@@ -429,6 +416,26 @@ mymain(void)
     DO_TEST("full", "/bin/emulatorbin", "my-machine-type",
             "x86_64", VIR_DOMAIN_VIRT_KVM, CAPS_ALL);
 
+#define DO_TEST_BHYVE(Name, Emulator, BhyveCaps, Type) \
+    do {                                                                \
+        char *name = NULL;                                              \
+        if (virAsprintf(&name, "bhyve_%s.x86_64", Name) < 0) {          \
+             ret = -1;                                                  \
+             break;                                                     \
+        }                                                               \
+        struct testData data = {                                        \
+            .name = name,                                               \
+            .emulator = Emulator,                                       \
+            .arch = "x86_64",                                           \
+            .type = Type,                                               \
+            .capsType = CAPS_BHYVE,                                     \
+            .capsOpaque = BhyveCaps,                                    \
+        };                                                              \
+        if (virTestRun(name, test_virDomainCapsFormat, &data) < 0)      \
+            ret = -1;                                                   \
+        VIR_FREE(name);                                                 \
+    } while (0)
+
 #if WITH_QEMU
 
     DO_TEST_QEMU("1.7.0", "caps_1.7.0",
@@ -467,6 +474,10 @@ mymain(void)
                  "/usr/bin/qemu-system-x86_64", NULL,
                  "x86_64", VIR_DOMAIN_VIRT_KVM);
 
+    DO_TEST_QEMU("2.9.0", "caps_2.9.0",
+                 "/usr/bin/qemu-system-x86_64", "q35",
+                 "x86_64", VIR_DOMAIN_VIRT_KVM);
+
     DO_TEST_QEMU("2.9.0-tcg", "caps_2.9.0",
                  "/usr/bin/qemu-system-x86_64", NULL,
                  "x86_64", VIR_DOMAIN_VIRT_QEMU);
@@ -478,6 +489,8 @@ mymain(void)
     DO_TEST_QEMU("2.8.0", "caps_2.8.0",
                  "/usr/bin/qemu-system-s390x", NULL,
                  "s390x", VIR_DOMAIN_VIRT_KVM);
+
+    virObjectUnref(cfg);
 
 #endif /* WITH_QEMU */
 
@@ -498,13 +511,23 @@ mymain(void)
 
 #endif /* WITH_LIBXL */
 
+#if WITH_BHYVE
+    DO_TEST_BHYVE("basic", "/usr/sbin/bhyve", &bhyve_caps, VIR_DOMAIN_VIRT_BHYVE);
+
+    bhyve_caps |= BHYVE_CAP_LPC_BOOTROM;
+    DO_TEST_BHYVE("uefi", "/usr/sbin/bhyve", &bhyve_caps, VIR_DOMAIN_VIRT_BHYVE);
+
+    bhyve_caps |= BHYVE_CAP_FBUF;
+    DO_TEST_BHYVE("fbuf", "/usr/sbin/bhyve", &bhyve_caps, VIR_DOMAIN_VIRT_BHYVE);
+#endif /* WITH_BHYVE */
+
     return ret;
 }
 
 #if WITH_QEMU
-VIRT_TEST_MAIN_PRELOAD(mymain,
+VIR_TEST_MAIN_PRELOAD(mymain,
                        abs_builddir "/.libs/domaincapsmock.so",
                        abs_builddir "/.libs/qemucpumock.so")
 #else
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/domaincapsmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/domaincapsmock.so")
 #endif

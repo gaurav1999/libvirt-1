@@ -26,11 +26,13 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 
+#include "dirname.h"
 #include "node_device_driver.h"
 #include "node_device_hal.h"
 #include "node_device_linux_sysfs.h"
 #include "virerror.h"
 #include "viralloc.h"
+#include "virfcp.h"
 #include "virlog.h"
 #include "virfile.h"
 #include "virscsihost.h"
@@ -46,80 +48,50 @@ VIR_LOG_INIT("node_device.node_device_linux_sysfs");
 int
 nodeDeviceSysfsGetSCSIHostCaps(virNodeDevCapSCSIHostPtr scsi_host)
 {
-    char *tmp = NULL;
+    return virNodeDeviceGetSCSIHostCaps(scsi_host);
+}
+
+
+int
+nodeDeviceSysfsGetSCSITargetCaps(const char *sysfsPath,
+                                 virNodeDevCapSCSITargetPtr scsi_target)
+{
     int ret = -1;
+    char *dir = NULL, *rport = NULL;
 
-    if ((scsi_host->unique_id =
-         virSCSIHostGetUniqueId(NULL, scsi_host->host)) < 0) {
-        VIR_DEBUG("Failed to read unique_id for host%d", scsi_host->host);
-        scsi_host->unique_id = -1;
+    VIR_DEBUG("Checking if '%s' is an FC remote port", scsi_target->name);
+
+    /* /sys/devices/[...]/host0/rport-0:0-0/target0:0:0 -> rport-0:0-0 */
+    if (!(dir = mdir_name(sysfsPath)))
+        return -1;
+
+    if (VIR_STRDUP(rport, last_component(dir)) < 0)
+        goto cleanup;
+
+    if (!virFCIsCapableRport(rport))
+        goto cleanup;
+
+    VIR_FREE(scsi_target->rport);
+    VIR_STEAL_PTR(scsi_target->rport, rport);
+
+    if (virFCReadRportValue(scsi_target->rport, "port_name",
+                            &scsi_target->wwpn) < 0) {
+        VIR_WARN("Failed to read port_name for '%s'", scsi_target->rport);
+        goto cleanup;
     }
 
-    VIR_DEBUG("Checking if host%d is an FC HBA", scsi_host->host);
-
-    if (virVHBAPathExists(NULL, scsi_host->host)) {
-        scsi_host->flags |= VIR_NODE_DEV_CAP_FLAG_HBA_FC_HOST;
-
-        if (!(tmp = virVHBAGetConfig(NULL, scsi_host->host, "port_name"))) {
-            VIR_WARN("Failed to read WWPN for host%d", scsi_host->host);
-            goto cleanup;
-        }
-        VIR_FREE(scsi_host->wwpn);
-        VIR_STEAL_PTR(scsi_host->wwpn, tmp);
-
-        if (!(tmp = virVHBAGetConfig(NULL, scsi_host->host, "node_name"))) {
-            VIR_WARN("Failed to read WWNN for host%d", scsi_host->host);
-            goto cleanup;
-        }
-        VIR_FREE(scsi_host->wwnn);
-        VIR_STEAL_PTR(scsi_host->wwnn, tmp);
-
-        if ((tmp = virVHBAGetConfig(NULL, scsi_host->host, "fabric_name"))) {
-            VIR_FREE(scsi_host->fabric_wwn);
-            VIR_STEAL_PTR(scsi_host->fabric_wwn, tmp);
-        }
-    }
-
-    if (virVHBAIsVportCapable(NULL, scsi_host->host)) {
-        scsi_host->flags |= VIR_NODE_DEV_CAP_FLAG_HBA_VPORT_OPS;
-
-        if (!(tmp = virVHBAGetConfig(NULL, scsi_host->host,
-                                     "max_npiv_vports"))) {
-            VIR_WARN("Failed to read max_npiv_vports for host%d",
-                     scsi_host->host);
-            goto cleanup;
-        }
-
-        if (virStrToLong_i(tmp, NULL, 10, &scsi_host->max_vports) < 0) {
-            VIR_WARN("Failed to parse value of max_npiv_vports '%s'", tmp);
-            goto cleanup;
-        }
-
-         if (!(tmp = virVHBAGetConfig(NULL, scsi_host->host,
-                                      "npiv_vports_inuse"))) {
-            VIR_WARN("Failed to read npiv_vports_inuse for host%d",
-                     scsi_host->host);
-            goto cleanup;
-        }
-
-        if (virStrToLong_i(tmp, NULL, 10, &scsi_host->vports) < 0) {
-            VIR_WARN("Failed to parse value of npiv_vports_inuse '%s'", tmp);
-            goto cleanup;
-        }
-    }
-
+    scsi_target->flags |= VIR_NODE_DEV_CAP_FLAG_FC_RPORT;
     ret = 0;
+
  cleanup:
     if (ret < 0) {
-        /* Clear the two flags in case of producing confusing XML output */
-        scsi_host->flags &= ~(VIR_NODE_DEV_CAP_FLAG_HBA_FC_HOST |
-                                VIR_NODE_DEV_CAP_FLAG_HBA_VPORT_OPS);
-
-        VIR_FREE(scsi_host->wwnn);
-        VIR_FREE(scsi_host->wwpn);
-        VIR_FREE(scsi_host->fabric_wwn);
+        VIR_FREE(scsi_target->rport);
+        VIR_FREE(scsi_target->wwpn);
+        scsi_target->flags &= ~VIR_NODE_DEV_CAP_FLAG_FC_RPORT;
     }
-    VIR_FREE(tmp);
+    VIR_FREE(rport);
+    VIR_FREE(dir);
+
     return ret;
 }
 
@@ -226,6 +198,12 @@ nodeDeviceSysfsGetPCIRelatedDevCaps(const char *sysfsPath,
 
 int
 nodeDeviceSysfsGetSCSIHostCaps(virNodeDevCapSCSIHostPtr scsi_host ATTRIBUTE_UNUSED)
+{
+    return -1;
+}
+
+int nodeDeviceSysfsGetSCSITargetCaps(const char *sysfsPath ATTRIBUTE_UNUSED,
+                                     virNodeDevCapSCSITargetPtr scsi_target ATTRIBUTE_UNUSED)
 {
     return -1;
 }

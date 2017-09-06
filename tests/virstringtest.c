@@ -480,6 +480,38 @@ testStringSearch(const void *opaque)
 }
 
 
+struct stringMatchData {
+    const char *str;
+    const char *regexp;
+    bool expectMatch;
+};
+
+static int
+testStringMatch(const void *opaque)
+{
+    const struct stringMatchData *data = opaque;
+    bool match;
+
+    match = virStringMatch(data->str, data->regexp);
+
+    if (data->expectMatch) {
+        if (!match) {
+            fprintf(stderr, "expected match for '%s' on '%s' but got no match\n",
+                    data->regexp, data->str);
+            return -1;
+        }
+    } else {
+        if (match) {
+            fprintf(stderr, "expected no match for '%s' on '%s' but got match\n",
+                    data->regexp, data->str);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
 struct stringReplaceData {
     const char *haystack;
     const char *oldneedle;
@@ -619,6 +651,48 @@ testStringToLong(const void *opaque)
     return ret;
 }
 
+
+struct stringToDoubleData {
+    const char *str;
+    const char *end_ptr;
+    double res;
+};
+
+/* This test checks if double strings are successfully converted to double
+ * number considering the byproduct string too. */
+static int
+testStringToDouble(const void *opaque)
+{
+    const struct stringToDoubleData *data = opaque;
+    int ret = -1;
+    char *end_ptr = NULL;
+    double res = 0;
+
+    /* end_ptr returns or a substring or an empty string.
+     * It never returns a NULL pointer. */
+    if ((ret = virStrToDouble(data->str,
+                              data->end_ptr ? &end_ptr : NULL,
+                              &res)) < 0) {
+        fprintf(stderr, "Convert error of '%s', expected '%lf'\n",
+                data->str, data->res);
+        return ret;
+    }
+
+    if (res != data->res) {
+        fprintf(stderr, "Returned '%lf', expected '%lf'\n",
+                res, data->res);
+        return -1;
+    }
+
+    /* Comparing substrings. */
+    if (STRNEQ_NULLABLE(end_ptr, data->end_ptr)) {
+        fprintf(stderr, "Expected substring '%s', but got '%s'\n",
+                end_ptr, data->end_ptr);
+        return -1;
+    }
+
+    return ret;
+}
 
 /* The point of this test is to check whether all members of the array are
  * freed. The test has to be checked using valgrind. */
@@ -803,6 +877,21 @@ mymain(void)
     const char *matches3[] = { "foo", "bar" };
     TEST_SEARCH("1foo2bar3eek", "([a-z]+)", 2, 2, matches3, false);
 
+#define TEST_MATCH(s, r, m)                                                 \
+    do {                                                                    \
+        struct stringMatchData data = {                                     \
+            .str = s,                                                       \
+            .regexp = r,                                                    \
+            .expectMatch = m,                                               \
+        };                                                                  \
+        if (virTestRun("virStringMatch " s, testStringMatch, &data) < 0)    \
+            ret = -1;                                                       \
+    } while (0)
+
+    TEST_MATCH("foo", "foo", true);
+    TEST_MATCH("foobar", "f[o]+", true);
+    TEST_MATCH("foobar", "^f[o]+$", false);
+
 #define TEST_REPLACE(h, o, n, r)                                             \
     do {                                                                     \
         struct stringReplaceData data = {                                    \
@@ -918,6 +1007,44 @@ mymain(void)
     TEST_STRTOL("-18446744073709551616", NULL, 0, -1, 0U, -1,
                 0LL, -1, 0ULL, -1);
 
+#define TEST_STRTOD(str, end_ptr, res)                                  \
+    do {                                                                \
+        struct stringToDoubleData data = {                              \
+            str, end_ptr, res,                                          \
+        };                                                              \
+        if (virTestRun("virStringToDouble '" str "'",                   \
+                       testStringToDouble, &data) < 0)                  \
+            ret = -1;                                                   \
+    } while (0)
+
+    /* Simple numbers. */
+    TEST_STRTOD("0.0", NULL, 0);
+    TEST_STRTOD("1.0", NULL, 1);
+    TEST_STRTOD("3.14159", NULL, 3.14159);
+    TEST_STRTOD("0.57721", NULL, 0.57721);
+
+    /* Testing ending string. */
+    TEST_STRTOD("2.718", "", 2.718);
+    TEST_STRTOD("2.718 281 828 459", " 281 828 459", 2.718);
+    TEST_STRTOD("2.718,281,828,459", ",281,828,459", 2.718);
+
+    /* Scientific numbers. */
+    TEST_STRTOD("3.14159e+000", NULL, 3.14159);
+    TEST_STRTOD("2.00600e+003", NULL, 2006);
+    TEST_STRTOD("1.00000e-010", NULL, 1e-010);
+
+    /* Negative numbers. */
+    TEST_STRTOD("-1.6180339887", NULL, -1.6180339887);
+    TEST_STRTOD("-0.00031e-010", NULL, -0.00031e-010);
+
+    /* Long numbers. */
+    TEST_STRTOD("57089907708238388904078437636832797971793838081897.0",
+                NULL,
+                57089907708238388904078437636832797971793838081897.0);
+    TEST_STRTOD("3.141592653589793238462643383279502884197169399375105",
+                NULL,
+                3.141592653589793238462643383279502884197169399375105);
+
     /* test virStringListFreeCount */
     if (virTestRun("virStringListFreeCount", testVirStringListFreeCount,
                    NULL) < 0)
@@ -961,4 +1088,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

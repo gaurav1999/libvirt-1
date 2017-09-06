@@ -36,6 +36,7 @@
 #include "virerror.h"
 #include "viralloc.h"
 #include "virlog.h"
+#include "virmdev.h"
 #include "virpci.h"
 #include "virusb.h"
 #include "virscsi.h"
@@ -1741,6 +1742,7 @@ virSecuritySELinuxSetHostLabel(virSCSIVHostDevicePtr dev ATTRIBUTE_UNUSED,
     return virSecuritySELinuxSetHostdevLabelHelper(file, opaque);
 }
 
+
 static int
 virSecuritySELinuxSetHostdevSubsysLabel(virSecurityManagerPtr mgr,
                                         virDomainDefPtr def,
@@ -1752,6 +1754,7 @@ virSecuritySELinuxSetHostdevSubsysLabel(virSecurityManagerPtr mgr,
     virDomainHostdevSubsysPCIPtr pcisrc = &dev->source.subsys.u.pci;
     virDomainHostdevSubsysSCSIPtr scsisrc = &dev->source.subsys.u.scsi;
     virDomainHostdevSubsysSCSIVHostPtr hostsrc = &dev->source.subsys.u.scsi_host;
+    virDomainHostdevSubsysMediatedDevPtr mdevsrc = &dev->source.subsys.u.mdev;
     virSecuritySELinuxCallbackData data = {.mgr = mgr, .def = def};
 
     int ret = -1;
@@ -1835,6 +1838,18 @@ virSecuritySELinuxSetHostdevSubsysLabel(virSecurityManagerPtr mgr,
                                             virSecuritySELinuxSetHostLabel,
                                             &data);
         virSCSIVHostDeviceFree(host);
+        break;
+    }
+
+    case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV: {
+        char *vfiodev = NULL;
+
+        if (!(vfiodev = virMediatedDeviceGetIOMMUGroupDev(mdevsrc->uuidstr)))
+            goto done;
+
+        ret = virSecuritySELinuxSetHostdevLabelHelper(vfiodev, &data);
+
+        VIR_FREE(vfiodev);
         break;
     }
 
@@ -1972,6 +1987,7 @@ virSecuritySELinuxRestoreHostLabel(virSCSIVHostDevicePtr dev ATTRIBUTE_UNUSED,
     return virSecuritySELinuxRestoreFileLabel(mgr, file);
 }
 
+
 static int
 virSecuritySELinuxRestoreHostdevSubsysLabel(virSecurityManagerPtr mgr,
                                             virDomainHostdevDefPtr dev,
@@ -1982,6 +1998,7 @@ virSecuritySELinuxRestoreHostdevSubsysLabel(virSecurityManagerPtr mgr,
     virDomainHostdevSubsysPCIPtr pcisrc = &dev->source.subsys.u.pci;
     virDomainHostdevSubsysSCSIPtr scsisrc = &dev->source.subsys.u.scsi;
     virDomainHostdevSubsysSCSIVHostPtr hostsrc = &dev->source.subsys.u.scsi_host;
+    virDomainHostdevSubsysMediatedDevPtr mdevsrc = &dev->source.subsys.u.mdev;
     int ret = -1;
 
     /* Like virSecuritySELinuxRestoreImageLabelInt() for a networked
@@ -2062,6 +2079,18 @@ virSecuritySELinuxRestoreHostdevSubsysLabel(virSecurityManagerPtr mgr,
                                             mgr);
         virSCSIVHostDeviceFree(host);
 
+        break;
+    }
+
+    case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV: {
+        char *vfiodev = NULL;
+
+        if (!(vfiodev = virMediatedDeviceGetIOMMUGroupDev(mdevsrc->uuidstr)))
+            goto done;
+
+        ret = virSecuritySELinuxRestoreFileLabel(mgr, vfiodev);
+
+        VIR_FREE(vfiodev);
         break;
     }
 
@@ -2150,8 +2179,8 @@ virSecuritySELinuxRestoreHostdevLabel(virSecurityManagerPtr mgr,
 static int
 virSecuritySELinuxSetChardevLabel(virSecurityManagerPtr mgr,
                                   virDomainDefPtr def,
-                                  virDomainChrDefPtr dev,
-                                  virDomainChrSourceDefPtr dev_source)
+                                  virDomainChrSourceDefPtr dev_source,
+                                  bool chardevStdioLogd)
 
 {
     virSecurityLabelDefPtr seclabel;
@@ -2164,11 +2193,15 @@ virSecuritySELinuxSetChardevLabel(virSecurityManagerPtr mgr,
     if (!seclabel || !seclabel->relabel)
         return 0;
 
-    if (dev)
-        chr_seclabel = virDomainChrDefGetSecurityLabelDef(dev,
-                                                          SECURITY_SELINUX_NAME);
+    chr_seclabel = virDomainChrSourceDefGetSecurityLabelDef(dev_source,
+                                                            SECURITY_SELINUX_NAME);
 
     if (chr_seclabel && !chr_seclabel->relabel)
+        return 0;
+
+    if (!chr_seclabel &&
+        dev_source->type == VIR_DOMAIN_CHR_TYPE_FILE &&
+        chardevStdioLogd)
         return 0;
 
     if (chr_seclabel)
@@ -2225,8 +2258,8 @@ virSecuritySELinuxSetChardevLabel(virSecurityManagerPtr mgr,
 static int
 virSecuritySELinuxRestoreChardevLabel(virSecurityManagerPtr mgr,
                                       virDomainDefPtr def,
-                                      virDomainChrDefPtr dev,
-                                      virDomainChrSourceDefPtr dev_source)
+                                      virDomainChrSourceDefPtr dev_source,
+                                      bool chardevStdioLogd)
 
 {
     virSecurityLabelDefPtr seclabel;
@@ -2238,10 +2271,14 @@ virSecuritySELinuxRestoreChardevLabel(virSecurityManagerPtr mgr,
     if (!seclabel || !seclabel->relabel)
         return 0;
 
-    if (dev)
-        chr_seclabel = virDomainChrDefGetSecurityLabelDef(dev,
-                                                          SECURITY_SELINUX_NAME);
+    chr_seclabel = virDomainChrSourceDefGetSecurityLabelDef(dev_source,
+                                                            SECURITY_SELINUX_NAME);
     if (chr_seclabel && !chr_seclabel->relabel)
+        return 0;
+
+    if (!chr_seclabel &&
+        dev_source->type == VIR_DOMAIN_CHR_TYPE_FILE &&
+        chardevStdioLogd)
         return 0;
 
     switch (dev_source->type) {
@@ -2287,19 +2324,21 @@ virSecuritySELinuxRestoreChardevLabel(virSecurityManagerPtr mgr,
 }
 
 
+struct _virSecuritySELinuxChardevCallbackData {
+    virSecurityManagerPtr mgr;
+    bool chardevStdioLogd;
+};
+
+
 static int
 virSecuritySELinuxRestoreSecurityChardevCallback(virDomainDefPtr def,
-                                                 virDomainChrDefPtr dev,
+                                                 virDomainChrDefPtr dev ATTRIBUTE_UNUSED,
                                                  void *opaque)
 {
-    virSecurityManagerPtr mgr = opaque;
+    struct _virSecuritySELinuxChardevCallbackData *data = opaque;
 
-    /* This is taken care of by processing of def->serials */
-    if (dev->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CONSOLE &&
-        dev->targetType == VIR_DOMAIN_CHR_CONSOLE_TARGET_TYPE_SERIAL)
-        return 0;
-
-    return virSecuritySELinuxRestoreChardevLabel(mgr, def, dev, dev->source);
+    return virSecuritySELinuxRestoreChardevLabel(data->mgr, def, dev->source,
+                                                 data->chardevStdioLogd);
 }
 
 
@@ -2322,7 +2361,8 @@ virSecuritySELinuxRestoreSecuritySmartcardCallback(virDomainDefPtr def,
         return virSecuritySELinuxRestoreFileLabel(mgr, database);
 
     case VIR_DOMAIN_SMARTCARD_TYPE_PASSTHROUGH:
-        return virSecuritySELinuxRestoreChardevLabel(mgr, def, NULL, dev->data.passthru);
+        return virSecuritySELinuxRestoreChardevLabel(mgr, def,
+                                                     dev->data.passthru, false);
 
     default:
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -2349,7 +2389,8 @@ virSecuritySELinuxGetBaseLabel(virSecurityManagerPtr mgr, int virtType)
 static int
 virSecuritySELinuxRestoreAllLabel(virSecurityManagerPtr mgr,
                                   virDomainDefPtr def,
-                                  bool migrated)
+                                  bool migrated,
+                                  bool chardevStdioLogd)
 {
     virSecurityLabelDefPtr secdef;
     virSecuritySELinuxDataPtr data = virSecurityManagerGetPrivateData(mgr);
@@ -2394,10 +2435,15 @@ virSecuritySELinuxRestoreAllLabel(virSecurityManagerPtr mgr,
             rc = -1;
     }
 
+    struct _virSecuritySELinuxChardevCallbackData chardevData = {
+        .mgr = mgr,
+        .chardevStdioLogd = chardevStdioLogd
+    };
+
     if (virDomainChrDefForeach(def,
                                false,
                                virSecuritySELinuxRestoreSecurityChardevCallback,
-                               mgr) < 0)
+                               &chardevData) < 0)
         rc = -1;
 
     if (virDomainSmartcardDefForeach(def,
@@ -2683,17 +2729,13 @@ virSecuritySELinuxClearSocketLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
 
 static int
 virSecuritySELinuxSetSecurityChardevCallback(virDomainDefPtr def,
-                                             virDomainChrDefPtr dev,
+                                             virDomainChrDefPtr dev ATTRIBUTE_UNUSED,
                                              void *opaque)
 {
-    virSecurityManagerPtr mgr = opaque;
+    struct _virSecuritySELinuxChardevCallbackData *data = opaque;
 
-    /* This is taken care of by processing of def->serials */
-    if (dev->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CONSOLE &&
-        dev->targetType == VIR_DOMAIN_CHR_CONSOLE_TARGET_TYPE_SERIAL)
-        return 0;
-
-    return virSecuritySELinuxSetChardevLabel(mgr, def, dev, dev->source);
+    return virSecuritySELinuxSetChardevLabel(data->mgr, def, dev->source,
+                                             data->chardevStdioLogd);
 }
 
 
@@ -2717,8 +2759,8 @@ virSecuritySELinuxSetSecuritySmartcardCallback(virDomainDefPtr def,
         return virSecuritySELinuxSetFilecon(mgr, database, data->content_context);
 
     case VIR_DOMAIN_SMARTCARD_TYPE_PASSTHROUGH:
-        return virSecuritySELinuxSetChardevLabel(mgr, def, NULL,
-                                                 dev->data.passthru);
+        return virSecuritySELinuxSetChardevLabel(mgr, def,
+                                                 dev->data.passthru, false);
 
     default:
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -2734,7 +2776,8 @@ virSecuritySELinuxSetSecuritySmartcardCallback(virDomainDefPtr def,
 static int
 virSecuritySELinuxSetAllLabel(virSecurityManagerPtr mgr,
                               virDomainDefPtr def,
-                              const char *stdin_path)
+                              const char *stdin_path,
+                              bool chardevStdioLogd)
 {
     size_t i;
     virSecuritySELinuxDataPtr data = virSecurityManagerGetPrivateData(mgr);
@@ -2782,10 +2825,15 @@ virSecuritySELinuxSetAllLabel(virSecurityManagerPtr mgr,
             return -1;
     }
 
+    struct _virSecuritySELinuxChardevCallbackData chardevData = {
+        .mgr = mgr,
+        .chardevStdioLogd = chardevStdioLogd
+    };
+
     if (virDomainChrDefForeach(def,
                                true,
                                virSecuritySELinuxSetSecurityChardevCallback,
-                               mgr) < 0)
+                               &chardevData) < 0)
         return -1;
 
     if (virDomainSmartcardDefForeach(def,

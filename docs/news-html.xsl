@@ -8,7 +8,7 @@
 
   <!-- Document -->
   <xsl:template match="/libvirt">
-    <xsl:text disable-output-escaping="yes">&lt;!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"&gt;
+    <xsl:text disable-output-escaping="yes">&lt;!DOCTYPE html&gt;
 </xsl:text>
     <html xmlns="http://www.w3.org/1999/xhtml">
       <head>
@@ -57,9 +57,11 @@
       <strong>
         <xsl:value-of select="@title"/>
       </strong>
-      <ul>
-        <xsl:apply-templates select="change"/>
-      </ul>
+      <xsl:if test="*">
+        <ul>
+          <xsl:apply-templates select="change"/>
+        </ul>
+      </xsl:if>
     </li>
   </xsl:template>
 
@@ -82,15 +84,11 @@
     <xsl:apply-templates/>
   </xsl:template>
 
-  <!-- Misc HTML tags, add more as they are needed -->
-  <xsl:template match="code|i|tt">
-    <xsl:text disable-output-escaping="yes">&lt;</xsl:text>
-    <xsl:value-of select="name()"/>
-    <xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+  <!-- <code> HTML tag -->
+  <xsl:template match="code">
+    <xsl:text disable-output-escaping="yes">&lt;code&gt;</xsl:text>
     <xsl:apply-templates/>
-    <xsl:text disable-output-escaping="yes">&lt;/</xsl:text>
-    <xsl:value-of select="name()"/>
-    <xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+    <xsl:text disable-output-escaping="yes">&lt;/code&gt;</xsl:text>
   </xsl:template>
 
 </xsl:stylesheet>

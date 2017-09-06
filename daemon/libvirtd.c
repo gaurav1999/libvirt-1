@@ -60,6 +60,7 @@
 #include "virgettext.h"
 #include "util/virnetdevopenvswitch.h"
 
+<<<<<<< HEAD
 #ifdef WITH_DRIVER_MODULES
 # include "driver.h"
 #else
@@ -109,6 +110,8 @@
 #ifdef WITH_VZ
 # include "vz/vz_driver.h"
 #endif
+
+#include "driver.h"
 
 #include "configmake.h"
 
@@ -265,49 +268,47 @@ daemonUnixSocketPaths(struct daemonConfig *config,
                       char **rosockfile,
                       char **admsockfile)
 {
+    int ret = -1;
+    char *rundir = NULL;
+
     if (config->unix_sock_dir) {
         if (virAsprintf(sockfile, "%s/libvirt-sock", config->unix_sock_dir) < 0)
-            goto error;
+            goto cleanup;
 
         if (privileged) {
-            if (virAsprintf(rosockfile, "%s/libvirt-sock-ro", config->unix_sock_dir) < 0)
-                goto error;
-            if (virAsprintf(admsockfile, "%s/libvirt-admin-sock", config->unix_sock_dir) < 0)
-                goto error;
+            if (virAsprintf(rosockfile, "%s/libvirt-sock-ro", config->unix_sock_dir) < 0 ||
+                virAsprintf(admsockfile, "%s/libvirt-admin-sock", config->unix_sock_dir) < 0)
+                goto cleanup;
         }
     } else {
         if (privileged) {
             if (VIR_STRDUP(*sockfile, LOCALSTATEDIR "/run/libvirt/libvirt-sock") < 0 ||
                 VIR_STRDUP(*rosockfile, LOCALSTATEDIR "/run/libvirt/libvirt-sock-ro") < 0 ||
                 VIR_STRDUP(*admsockfile, LOCALSTATEDIR "/run/libvirt/libvirt-admin-sock") < 0)
-                goto error;
+                goto cleanup;
         } else {
-            char *rundir = NULL;
             mode_t old_umask;
 
             if (!(rundir = virGetUserRuntimeDirectory()))
-                goto error;
+                goto cleanup;
 
             old_umask = umask(077);
             if (virFileMakePath(rundir) < 0) {
                 umask(old_umask);
-                goto error;
+                goto cleanup;
             }
             umask(old_umask);
 
             if (virAsprintf(sockfile, "%s/libvirt-sock", rundir) < 0 ||
-                virAsprintf(admsockfile, "%s/libvirt-admin-sock", rundir) < 0) {
-                VIR_FREE(rundir);
-                goto error;
-            }
-
-            VIR_FREE(rundir);
+                virAsprintf(admsockfile, "%s/libvirt-admin-sock", rundir) < 0)
+                goto cleanup;
         }
     }
-    return 0;
 
- error:
-    return -1;
+    ret = 0;
+ cleanup:
+    VIR_FREE(rundir);
+    return ret;
 }
 
 
@@ -346,13 +347,8 @@ static int daemonErrorLogFilter(virErrorPtr err, int priority)
 }
 
 
-#ifdef WITH_DRIVER_MODULES
-# define VIR_DAEMON_LOAD_MODULE(func, module) \
+#define VIR_DAEMON_LOAD_MODULE(func, module) \
     virDriverLoadModule(module, #func)
-#else
-# define VIR_DAEMON_LOAD_MODULE(func, module) \
-    func()
-#endif
 static void daemonInitialize(void)
 {
     /*
@@ -616,11 +612,11 @@ daemonSetupNetworking(virNetServerPtr srv,
 
 #if WITH_SASL
     if (config->auth_unix_rw == REMOTE_AUTH_SASL ||
-        config->auth_unix_ro == REMOTE_AUTH_SASL ||
+        (sock_path_ro && config->auth_unix_ro == REMOTE_AUTH_SASL) ||
 # if WITH_GNUTLS
-        config->auth_tls == REMOTE_AUTH_SASL ||
+        (ipsock && config->listen_tls && config->auth_tls == REMOTE_AUTH_SASL) ||
 # endif
-        config->auth_tcp == REMOTE_AUTH_SASL) {
+        (ipsock && config->listen_tcp && config->auth_tcp == REMOTE_AUTH_SASL)) {
         saslCtxt = virNetSASLContextNewServer(
             (const char *const*)config->sasl_allowed_username_list);
         if (!saslCtxt)
@@ -670,19 +666,15 @@ daemonSetupLogging(struct daemonConfig *config,
      * Libvirtd's order of precedence is:
      * cmdline > environment > config
      *
-     * The default output is applied only if there was no setting from either
-     * the config or the environment. Because we don't have a way to determine
-     * if the log level has been set, we must process variables in the opposite
+     * Given the precedence, we must process the variables in the opposite
      * order, each one overriding the previous.
      */
     if (config->log_level != 0)
         virLogSetDefaultPriority(config->log_level);
 
-    if (virLogSetDefaultOutput("libvirtd.log", godaemon, privileged) < 0)
-        return -1;
-
-    /* In case the config is empty, the filters become empty and outputs will
-     * be set to default
+    /* In case the config is empty, both filters and outputs will become empty,
+     * however we can't start with empty outputs, thus we'll need to define and
+     * setup a default one.
      */
     ignore_value(virLogSetFilters(config->log_filters));
     ignore_value(virLogSetOutputs(config->log_outputs));
@@ -695,6 +687,15 @@ daemonSetupLogging(struct daemonConfig *config,
      */
     if ((verbose) && (virLogGetDefaultPriority() > VIR_LOG_INFO))
         virLogSetDefaultPriority(VIR_LOG_INFO);
+
+    /* Define the default output. This is only applied if there was no setting
+     * from either the config or the environment.
+     */
+    if (virLogSetDefaultOutput("libvirtd.log", godaemon, privileged) < 0)
+        return -1;
+
+    if (virLogGetNbOutputs() == 0)
+        virLogSetOutputs(virLogGetDefaultOutput());
 
     return 0;
 }
@@ -800,7 +801,7 @@ static void daemonInhibitCallback(bool inhibit, void *opaque)
 }
 
 
-#ifdef HAVE_DBUS
+#ifdef WITH_DBUS
 static DBusConnection *sessionBus;
 static DBusConnection *systemBus;
 
@@ -892,7 +893,7 @@ static void daemonRunStateInit(void *opaque)
 
     driversInitialized = true;
 
-#ifdef HAVE_DBUS
+#ifdef WITH_DBUS
     /* Tie the non-privileged libvirtd to the session/shutdown lifecycle */
     if (!virNetDaemonIsPrivileged(dmn)) {
 

@@ -413,8 +413,8 @@ testMachineName(const void *opaque)
     int ret = -1;
     char *actual = NULL;
 
-    if (!(actual = virSystemdMakeMachineName("qemu", data->id,
-                                             data->name, true)))
+    if (!(actual = virDomainGenerateMachineName("qemu", data->id,
+                                                data->name, true)))
         goto cleanup;
 
     if (STRNEQ(actual, data->expected)) {
@@ -604,7 +604,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virdbusmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virdbusmock.so")
 
 #else /* ! (WITH_DBUS && __linux__) */
 int

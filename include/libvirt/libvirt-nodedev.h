@@ -79,6 +79,9 @@ typedef enum {
     VIR_CONNECT_LIST_NODE_DEVICES_CAP_VPORTS        = 1 << 10, /* Capable of vport */
     VIR_CONNECT_LIST_NODE_DEVICES_CAP_SCSI_GENERIC  = 1 << 11, /* Capable of scsi_generic */
     VIR_CONNECT_LIST_NODE_DEVICES_CAP_DRM           = 1 << 12, /* DRM device */
+    VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV_TYPES    = 1 << 13, /* Capable of mediated devices */
+    VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV          = 1 << 14, /* Mediated device */
+    VIR_CONNECT_LIST_NODE_DEVICES_CAP_CCW_DEV       = 1 << 15, /* CCW device */
 } virConnectListAllNodeDeviceFlags;
 
 int                     virConnectListAllNodeDevices (virConnectPtr conn,
@@ -139,7 +142,7 @@ int                     virNodeDeviceDestroy    (virNodeDevicePtr dev);
  */
 typedef enum {
     VIR_NODE_DEVICE_EVENT_ID_LIFECYCLE = 0, /* virConnectNodeDeviceEventLifecycleCallback */
-    VIR_NODE_DEVICE_EVENT_ID_UPDATE = 1, /* virConnectNodeDeviceEventUpdateCallback */
+    VIR_NODE_DEVICE_EVENT_ID_UPDATE = 1, /* virConnectNodeDeviceEventGenericCallback */
 
 # ifdef VIR_ENUM_SENTINELS
     VIR_NODE_DEVICE_EVENT_ID_LAST

@@ -92,8 +92,7 @@ qemuParseDriveURIString(virDomainDiskDefPtr def, virURIPtr uri,
         if (VIR_STRDUP(def->src->hosts->name, uri->server) < 0)
             goto error;
 
-        if (virAsprintf(&def->src->hosts->port, "%d", uri->port) < 0)
-            goto error;
+        def->src->hosts->port = uri->port;
     } else {
         def->src->hosts->name = NULL;
         def->src->hosts->port = 0;
@@ -240,7 +239,7 @@ qemuParseNBDString(virDomainDiskDefPtr disk)
         if (src)
             *src++ = '\0';
 
-        if (VIR_STRDUP(h->port, port) < 0)
+        if (virStringParsePort(port, &h->port) < 0)
             goto error;
     }
 
@@ -654,7 +653,7 @@ qemuParseCommandLineDisk(virDomainXMLOptionPtr xmlopt,
     if (VIR_ALLOC(def->src) < 0)
         goto error;
 
-    if (qemuDomainMachineIsPSeries(dom))
+    if (qemuDomainIsPSeries(dom))
         def->bus = VIR_DOMAIN_DISK_BUS_SCSI;
     else
        def->bus = VIR_DOMAIN_DISK_BUS_IDE;
@@ -730,7 +729,7 @@ qemuParseCommandLineDisk(virDomainXMLOptionPtr xmlopt,
                             goto error;
                         def->src->nhosts = 1;
                         def->src->hosts->name = def->src->path;
-                        if (VIR_STRDUP(def->src->hosts->port, port) < 0)
+                        if (virStringParsePort(port, &def->src->hosts->port) < 0)
                             goto error;
                         def->src->hosts->transport = VIR_STORAGE_NET_HOST_TRANS_TCP;
                         def->src->hosts->socket = NULL;
@@ -746,7 +745,7 @@ qemuParseCommandLineDisk(virDomainXMLOptionPtr xmlopt,
         } else if (STREQ(keywords[i], "if")) {
             if (STREQ(values[i], "ide")) {
                 def->bus = VIR_DOMAIN_DISK_BUS_IDE;
-                if (qemuDomainMachineIsPSeries(dom)) {
+                if (qemuDomainIsPSeries(dom)) {
                     virReportError(VIR_ERR_INTERNAL_ERROR,
                                    _("pseries systems do not support ide devices '%s'"), val);
                     goto error;
@@ -1162,7 +1161,7 @@ qemuParseCommandLinePCI(const char *val)
     int bus = 0, slot = 0, func = 0;
     const char *start;
     char *end;
-    virDomainHostdevDefPtr def = virDomainHostdevDefAlloc(NULL);
+    virDomainHostdevDefPtr def = virDomainHostdevDefNew(NULL);
 
     if (!def)
         goto error;
@@ -1212,7 +1211,7 @@ qemuParseCommandLinePCI(const char *val)
 static virDomainHostdevDefPtr
 qemuParseCommandLineUSB(const char *val)
 {
-    virDomainHostdevDefPtr def = virDomainHostdevDefAlloc(NULL);
+    virDomainHostdevDefPtr def = virDomainHostdevDefNew(NULL);
     virDomainHostdevSubsysUSBPtr usbsrc;
     int first = 0, second = 0;
     const char *start;
@@ -1950,7 +1949,7 @@ qemuParseCommandLine(virCapsPtr caps,
             }
             if (STREQ(arg, "-cdrom")) {
                 disk->device = VIR_DOMAIN_DISK_DEVICE_CDROM;
-                if (qemuDomainMachineIsPSeries(def))
+                if (qemuDomainIsPSeries(def))
                     disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
                 if (VIR_STRDUP(disk->dst, "hdc") < 0)
                     goto error;
@@ -1965,7 +1964,7 @@ qemuParseCommandLine(virCapsPtr caps,
                         disk->bus = VIR_DOMAIN_DISK_BUS_IDE;
                     else
                         disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
-                   if (qemuDomainMachineIsPSeries(def))
+                   if (qemuDomainIsPSeries(def))
                        disk->bus = VIR_DOMAIN_DISK_BUS_SCSI;
                 }
                 if (VIR_STRDUP(disk->dst, arg + 1) < 0)
@@ -2005,7 +2004,7 @@ qemuParseCommandLine(virCapsPtr caps,
                             goto error;
                         disk->src->nhosts = 1;
                         disk->src->hosts->name = disk->src->path;
-                        if (VIR_STRDUP(disk->src->hosts->port, port) < 0)
+                        if (virStringParsePort(port, &disk->src->hosts->port) < 0)
                             goto error;
                         if (VIR_STRDUP(disk->src->path, vdi) < 0)
                             goto error;
@@ -2541,12 +2540,12 @@ qemuParseCommandLine(virCapsPtr caps,
             port = strchr(token, ':');
             if (port) {
                 *port++ = '\0';
-                if (VIR_STRDUP(port, port) < 0) {
+                if (virStringParsePort(port,
+                                       &first_rbd_disk->src->hosts[first_rbd_disk->src->nhosts].port) < 0) {
                     VIR_FREE(hosts);
                     goto error;
                 }
             }
-            first_rbd_disk->src->hosts[first_rbd_disk->src->nhosts].port = port;
             if (VIR_STRDUP(first_rbd_disk->src->hosts[first_rbd_disk->src->nhosts].name,
                            token) < 0) {
                 VIR_FREE(hosts);
@@ -2606,19 +2605,9 @@ qemuParseCommandLine(virCapsPtr caps,
 
     if (def->ngraphics) {
         virDomainVideoDefPtr vid;
-        if (VIR_ALLOC(vid) < 0)
+        if (!(vid = virDomainVideoDefNew()))
             goto error;
-        if (def->virtType == VIR_DOMAIN_VIRT_XEN)
-            vid->type = VIR_DOMAIN_VIDEO_TYPE_XEN;
-        else
-            vid->type = video;
-        if (vid->type == VIR_DOMAIN_VIDEO_TYPE_QXL) {
-            vid->vgamem = QEMU_QXL_VGAMEM_DEFAULT;
-        } else {
-            vid->ram = 0;
-            vid->vgamem = 0;
-        }
-        vid->heads = 1;
+        vid->type = video;
 
         if (VIR_APPEND_ELEMENT(def->videos, def->nvideos, vid) < 0) {
             virDomainVideoDefFree(vid);

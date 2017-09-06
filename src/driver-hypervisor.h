@@ -697,6 +697,11 @@ typedef int
 (*virDrvDomainAbortJob)(virDomainPtr domain);
 
 typedef int
+(*virDrvDomainMigrateGetMaxDowntime)(virDomainPtr domain,
+                                     unsigned long long *downtime,
+                                     unsigned int flags);
+
+typedef int
 (*virDrvDomainMigrateSetMaxDowntime)(virDomainPtr domain,
                                      unsigned long long downtime,
                                      unsigned int flags);
@@ -744,6 +749,15 @@ typedef int
 typedef int
 (*virDrvDomainManagedSaveRemove)(virDomainPtr domain,
                                  unsigned int flags);
+
+typedef char *
+(*virDrvDomainManagedSaveGetXMLDesc)(virDomainPtr domain,
+                                     unsigned int flags);
+
+typedef int
+(*virDrvDomainManagedSaveDefineXML)(virDomainPtr domain,
+                                    const char *dxml,
+                                    unsigned int flags);
 
 typedef virDomainSnapshotPtr
 (*virDrvDomainSnapshotCreateXML)(virDomainPtr domain,
@@ -1257,6 +1271,13 @@ typedef int
                        int state,
                        unsigned int flags);
 
+typedef int
+(*virDrvDomainSetBlockThreshold)(virDomainPtr domain,
+                                 const char *dev,
+                                 unsigned long long threshold,
+                                 unsigned int flags);
+
+
 typedef struct _virHypervisorDriver virHypervisorDriver;
 typedef virHypervisorDriver *virHypervisorDriverPtr;
 
@@ -1405,6 +1426,7 @@ struct _virHypervisorDriver {
     virDrvDomainGetJobInfo domainGetJobInfo;
     virDrvDomainGetJobStats domainGetJobStats;
     virDrvDomainAbortJob domainAbortJob;
+    virDrvDomainMigrateGetMaxDowntime domainMigrateGetMaxDowntime;
     virDrvDomainMigrateSetMaxDowntime domainMigrateSetMaxDowntime;
     virDrvDomainMigrateGetCompressionCache domainMigrateGetCompressionCache;
     virDrvDomainMigrateSetCompressionCache domainMigrateSetCompressionCache;
@@ -1415,6 +1437,8 @@ struct _virHypervisorDriver {
     virDrvDomainManagedSave domainManagedSave;
     virDrvDomainHasManagedSaveImage domainHasManagedSaveImage;
     virDrvDomainManagedSaveRemove domainManagedSaveRemove;
+    virDrvDomainManagedSaveGetXMLDesc domainManagedSaveGetXMLDesc;
+    virDrvDomainManagedSaveDefineXML domainManagedSaveDefineXML;
     virDrvDomainSnapshotCreateXML domainSnapshotCreateXML;
     virDrvDomainSnapshotGetXMLDesc domainSnapshotGetXMLDesc;
     virDrvDomainSnapshotNum domainSnapshotNum;
@@ -1496,6 +1520,7 @@ struct _virHypervisorDriver {
     virDrvDomainGetGuestVcpus domainGetGuestVcpus;
     virDrvDomainSetGuestVcpus domainSetGuestVcpus;
     virDrvDomainSetVcpu domainSetVcpu;
+    virDrvDomainSetBlockThreshold domainSetBlockThreshold;
 };
 
 

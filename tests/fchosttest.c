@@ -315,6 +315,7 @@ manageVHBAByStoragePool(const void *data)
         ignore_value(virStoragePoolDestroy(pool));
         goto cleanup;
     }
+    virNodeDeviceFree(dev);
 
     if (virStoragePoolDestroy(pool) < 0)
         goto cleanup;
@@ -322,6 +323,7 @@ manageVHBAByStoragePool(const void *data)
     if ((dev = virNodeDeviceLookupByName(conn, expect_hostname))) {
         VIR_DEBUG("Found expected_hostname '%s' after destroy",
                   expect_hostname);
+        virNodeDeviceFree(dev);
         goto cleanup;
     }
 
@@ -380,4 +382,4 @@ mymain(void)
     return ret;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virrandommock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virrandommock.so")

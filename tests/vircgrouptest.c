@@ -353,6 +353,7 @@ static int testCgroupNewForPartitionNested(const void *args ATTRIBUTE_UNUSED)
     }
 
     /* Should now work */
+    virCgroupFree(&cgroup);
     if ((rv = virCgroupNewPartition("/deployment/production", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /deployment/production cgroup: %d\n", -rv);
         goto cleanup;
@@ -401,12 +402,14 @@ static int testCgroupNewForPartitionNestedDeep(const void *args ATTRIBUTE_UNUSED
         goto cleanup;
     }
 
+    virCgroupFree(&cgroup);
     if ((rv = virCgroupNewPartition("/user/berrange.user", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /user/berrange.user cgroup: %d\n", -rv);
         goto cleanup;
     }
 
     /* Should now work */
+    virCgroupFree(&cgroup);
     if ((rv = virCgroupNewPartition("/user/berrange.user/production", true, -1, &cgroup)) != 0) {
         fprintf(stderr, "Failed to create /user/berrange.user/production cgroup: %d\n", -rv);
         goto cleanup;
@@ -885,6 +888,7 @@ mymain(void)
     DETECT_MOUNTS("cgroups3");
     DETECT_MOUNTS("all-in-one");
     DETECT_MOUNTS("no-cgroups");
+    DETECT_MOUNTS("kubevirt");
 
     if (virTestRun("New cgroup for self", testCgroupNewForSelf, NULL) < 0)
         ret = -1;
@@ -944,7 +948,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/vircgroupmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/vircgroupmock.so")
 
 #else
 int

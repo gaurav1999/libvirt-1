@@ -41,6 +41,7 @@
 #include "viralloc.h"
 #include "vircommand.h"
 #include "virlog.h"
+#include "driver.h"
 
 #include "security_driver.h"
 #include "security_apparmor.h"
@@ -55,7 +56,7 @@
 #include "virstring.h"
 #include "virgettext.h"
 
-#include "storage/storage_driver.h"
+#include "storage/storage_source.h"
 
 #define VIR_FROM_THIS VIR_FROM_SECURITY
 
@@ -512,7 +513,10 @@ valid_path(const char *path, const bool readonly)
         "/vmlinuz",
         "/initrd",
         "/initrd.img",
-        "/usr/share/ovmf/"               /* for OVMF images */
+        "/usr/share/OVMF/",              /* for OVMF images */
+        "/usr/share/ovmf/",              /* for OVMF images */
+        "/usr/share/AAVMF/",             /* for AAVMF images */
+        "/usr/share/qemu-efi/"           /* for AAVMF images */
     };
     /* override the above with these */
     const char * const override[] = {
@@ -612,7 +616,7 @@ caps_mockup(vahControl * ctl, const char *xmlStr)
         goto cleanup;
     }
 
-    if (!xmlStrEqual(ctxt->node->name, BAD_CAST "domain")) {
+    if (!virXMLNodeNameEqual(ctxt->node, "domain")) {
         vah_error(NULL, 0, _("unexpected root element, expecting <domain>"));
         goto cleanup;
     }
@@ -667,7 +671,7 @@ get_definition(vahControl * ctl, const char *xmlStr)
         goto exit;
     }
 
-    if (!(ctl->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL))) {
+    if (!(ctl->xmlopt = virDomainXMLOptionNew(NULL, NULL, NULL, NULL, NULL))) {
         vah_error(ctl, 0, _("Failed to create XML config object"));
         goto exit;
     }
@@ -888,11 +892,11 @@ add_file_path(virDomainDiskDefPtr disk,
 
     if (depth == 0) {
         if (disk->src->readonly)
-            ret = vah_add_file(buf, path, "r");
+            ret = vah_add_file(buf, path, "rk");
         else
-            ret = vah_add_file(buf, path, "rw");
+            ret = vah_add_file(buf, path, "rwk");
     } else {
-        ret = vah_add_file(buf, path, "r");
+        ret = vah_add_file(buf, path, "rk");
     }
 
     if (ret != 0)
@@ -922,6 +926,11 @@ get_files(vahControl * ctl)
         vah_error(ctl, 0, _("given uuid does not match XML uuid"));
         goto cleanup;
     }
+
+    /* load the storage driver so that backing store can be accessed */
+#ifdef WITH_STORAGE
+    virDriverLoadModule("storage", "storageRegister");
+#endif
 
     for (i = 0; i < ctl->def->ndisks; i++) {
         virDomainDiskDefPtr disk = ctl->def->disks[i];
@@ -1020,11 +1029,11 @@ get_files(vahControl * ctl)
             goto cleanup;
 
     if (ctl->def->os.loader && ctl->def->os.loader->path)
-        if (vah_add_file(&buf, ctl->def->os.loader->path, "r") != 0)
+        if (vah_add_file(&buf, ctl->def->os.loader->path, "rk") != 0)
             goto cleanup;
 
     if (ctl->def->os.loader && ctl->def->os.loader->nvram)
-        if (vah_add_file(&buf, ctl->def->os.loader->nvram, "rw") != 0)
+        if (vah_add_file(&buf, ctl->def->os.loader->nvram, "rwk") != 0)
             goto cleanup;
 
     for (i = 0; i < ctl->def->ngraphics; i++) {
@@ -1279,6 +1288,8 @@ main(int argc, char **argv)
         fprintf(stderr, _("%s: initialization failed\n"), argv[0]);
         exit(EXIT_FAILURE);
     }
+
+    virFileActivateDirOverride(argv[0]);
 
     /* Initialize the log system */
     virLogSetFromEnv();

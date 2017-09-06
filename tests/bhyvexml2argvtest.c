@@ -145,6 +145,11 @@ mymain(void)
     if ((driver.xmlopt = virBhyveDriverCreateXMLConf(&driver)) == NULL)
         return EXIT_FAILURE;
 
+    if (!(driver.remotePorts = virPortAllocatorNew("display", 5900, 65535,
+                                                   VIR_PORT_ALLOCATOR_SKIP_BIND_CHECK)))
+        return EXIT_FAILURE;
+
+
 # define DO_TEST_FULL(name, flags)                             \
     do {                                                       \
         static struct testInfo info = {                        \
@@ -167,7 +172,7 @@ mymain(void)
     driver.grubcaps = BHYVE_GRUB_CAP_CONSDEV;
     driver.bhyvecaps = BHYVE_CAP_RTC_UTC | BHYVE_CAP_AHCI32SLOT | \
                        BHYVE_CAP_NET_E1000 | BHYVE_CAP_LPC_BOOTROM | \
-                       BHYVE_CAP_FBUF;
+                       BHYVE_CAP_FBUF | BHYVE_CAP_XHCI;
 
     DO_TEST("base");
     DO_TEST("acpiapic");
@@ -193,6 +198,10 @@ mymain(void)
     DO_TEST("net-e1000");
     DO_TEST("uefi");
     DO_TEST("vnc");
+    DO_TEST("vnc-vgaconf-on");
+    DO_TEST("vnc-vgaconf-off");
+    DO_TEST("vnc-vgaconf-io");
+    DO_TEST("vnc-autoport");
 
     /* Address allocation tests */
     DO_TEST("addr-single-sata-disk");
@@ -206,6 +215,14 @@ mymain(void)
     DO_TEST("addr-no32devs-single-sata-disk");
     DO_TEST("addr-no32devs-multiple-sata-disks");
     DO_TEST_FAILURE("addr-no32devs-more-than-32-sata-disks");
+
+    /* USB xhci tablet */
+    DO_TEST("input-xhci-tablet");
+    DO_TEST_FAILURE("xhci-multiple-controllers");
+    DO_TEST_FAILURE("xhci-no-devs");
+    DO_TEST_FAILURE("xhci-multiple-devs");
+    driver.bhyvecaps ^= BHYVE_CAP_XHCI;
+    DO_TEST_FAILURE("input-xhci-tablet");
 
     driver.grubcaps = 0;
 
@@ -223,11 +240,12 @@ mymain(void)
 
     virObjectUnref(driver.caps);
     virObjectUnref(driver.xmlopt);
+    virObjectUnref(driver.remotePorts);
 
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/bhyvexml2argvmock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/bhyvexml2argvmock.so")
 
 #else
 

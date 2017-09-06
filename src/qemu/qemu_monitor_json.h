@@ -81,6 +81,8 @@ int qemuMonitorJSONSetMemoryStatsPeriod(qemuMonitorPtr mon,
                                         int period);
 int qemuMonitorJSONGetBlockInfo(qemuMonitorPtr mon,
                                 virHashTablePtr table);
+
+virJSONValuePtr qemuMonitorJSONQueryBlockstats(qemuMonitorPtr mon);
 int qemuMonitorJSONGetAllBlockStatsInfo(qemuMonitorPtr mon,
                                         virHashTablePtr hash,
                                         bool backingChain);
@@ -356,8 +358,9 @@ int qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
 int qemuMonitorJSONGetCPUModelExpansion(qemuMonitorPtr mon,
                                         qemuMonitorCPUModelExpansionType type,
                                         const char *model_name,
+                                        bool migratable,
                                         qemuMonitorCPUModelInfoPtr *model_info)
-    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
+    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(5);
 
 int qemuMonitorJSONGetCommands(qemuMonitorPtr mon,
                                char ***commands)
@@ -512,4 +515,13 @@ int qemuMonitorJSONGetHotpluggableCPUs(qemuMonitorPtr mon,
 
 virHashTablePtr qemuMonitorJSONQueryQMPSchema(qemuMonitorPtr mon)
     ATTRIBUTE_NONNULL(1);
+
+int qemuMonitorJSONSetBlockThreshold(qemuMonitorPtr mon,
+                                     const char *nodename,
+                                     unsigned long long threshold)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
+virJSONValuePtr qemuMonitorJSONQueryNamedBlockNodes(qemuMonitorPtr mon)
+    ATTRIBUTE_NONNULL(1);
+
 #endif /* QEMU_MONITOR_JSON_H */

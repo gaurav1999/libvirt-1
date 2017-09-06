@@ -72,12 +72,12 @@ secretDriverLock(void)
     virMutexLock(&driver->lock);
 }
 
+
 static void
 secretDriverUnlock(void)
 {
     virMutexUnlock(&driver->lock);
 }
-
 
 
 static virSecretObjPtr
@@ -86,8 +86,8 @@ secretObjFromSecret(virSecretPtr secret)
     virSecretObjPtr obj;
     char uuidstr[VIR_UUID_STRING_BUFLEN];
 
-    if (!(obj = virSecretObjListFindByUUID(driver->secrets, secret->uuid))) {
-        virUUIDFormat(secret->uuid, uuidstr);
+    virUUIDFormat(secret->uuid, uuidstr);
+    if (!(obj = virSecretObjListFindByUUID(driver->secrets, uuidstr))) {
         virReportError(VIR_ERR_NO_SECRET,
                        _("no secret with matching uuid '%s'"), uuidstr);
         return NULL;
@@ -95,17 +95,6 @@ secretObjFromSecret(virSecretPtr secret)
     return obj;
 }
 
-
-static int
-secretEnsureDirectory(void)
-{
-    if (mkdir(driver->configDir, S_IRWXU) < 0 && errno != EEXIST) {
-        virReportSystemError(errno, _("cannot create '%s'"),
-                             driver->configDir);
-        return -1;
-    }
-    return 0;
-}
 
 /* Driver functions */
 
@@ -119,6 +108,7 @@ secretConnectNumOfSecrets(virConnectPtr conn)
                                         virConnectNumOfSecretsCheckACL,
                                         conn);
 }
+
 
 static int
 secretConnectListSecrets(virConnectPtr conn,
@@ -156,18 +146,18 @@ secretLookupByUUID(virConnectPtr conn,
                    const unsigned char *uuid)
 {
     virSecretPtr ret = NULL;
-    virSecretObjPtr secret;
+    virSecretObjPtr obj;
     virSecretDefPtr def;
+    char uuidstr[VIR_UUID_STRING_BUFLEN];
 
-    if (!(secret = virSecretObjListFindByUUID(driver->secrets, uuid))) {
-        char uuidstr[VIR_UUID_STRING_BUFLEN];
-        virUUIDFormat(uuid, uuidstr);
+    virUUIDFormat(uuid, uuidstr);
+    if (!(obj = virSecretObjListFindByUUID(driver->secrets, uuidstr))) {
         virReportError(VIR_ERR_NO_SECRET,
                        _("no secret with matching uuid '%s'"), uuidstr);
         goto cleanup;
     }
 
-    def = virSecretObjGetDef(secret);
+    def = virSecretObjGetDef(obj);
     if (virSecretLookupByUUIDEnsureACL(conn, def) < 0)
         goto cleanup;
 
@@ -177,7 +167,7 @@ secretLookupByUUID(virConnectPtr conn,
                        def->usage_id);
 
  cleanup:
-    virSecretObjEndAPI(&secret);
+    virSecretObjEndAPI(&obj);
     return ret;
 }
 
@@ -188,17 +178,17 @@ secretLookupByUsage(virConnectPtr conn,
                     const char *usageID)
 {
     virSecretPtr ret = NULL;
-    virSecretObjPtr secret;
+    virSecretObjPtr obj;
     virSecretDefPtr def;
 
-    if (!(secret = virSecretObjListFindByUsage(driver->secrets,
-                                               usageType, usageID))) {
+    if (!(obj = virSecretObjListFindByUsage(driver->secrets,
+                                            usageType, usageID))) {
         virReportError(VIR_ERR_NO_SECRET,
                        _("no secret with matching usage '%s'"), usageID);
         goto cleanup;
     }
 
-    def = virSecretObjGetDef(secret);
+    def = virSecretObjGetDef(obj);
     if (virSecretLookupByUsageEnsureACL(conn, def) < 0)
         goto cleanup;
 
@@ -208,7 +198,7 @@ secretLookupByUsage(virConnectPtr conn,
                        def->usage_id);
 
  cleanup:
-    virSecretObjEndAPI(&secret);
+    virSecretObjEndAPI(&obj);
     return ret;
 }
 
@@ -219,129 +209,128 @@ secretDefineXML(virConnectPtr conn,
                 unsigned int flags)
 {
     virSecretPtr ret = NULL;
-    virSecretObjPtr secret = NULL;
+    virSecretObjPtr obj = NULL;
+    virSecretDefPtr objDef;
     virSecretDefPtr backup = NULL;
-    virSecretDefPtr new_attrs;
+    virSecretDefPtr def;
     virObjectEventPtr event = NULL;
 
     virCheckFlags(0, NULL);
 
-    if (!(new_attrs = virSecretDefParseString(xml)))
+    if (!(def = virSecretDefParseString(xml)))
         return NULL;
 
-    if (virSecretDefineXMLEnsureACL(conn, new_attrs) < 0)
+    if (virSecretDefineXMLEnsureACL(conn, def) < 0)
         goto cleanup;
 
-    if (!(secret = virSecretObjListAdd(driver->secrets, new_attrs,
-                                       driver->configDir, &backup)))
+    if (!(obj = virSecretObjListAdd(driver->secrets, def,
+                                    driver->configDir, &backup)))
         goto cleanup;
+    VIR_STEAL_PTR(objDef, def);
 
-    if (!new_attrs->isephemeral) {
-        if (secretEnsureDirectory() < 0)
-            goto cleanup;
-
+    if (!objDef->isephemeral) {
         if (backup && backup->isephemeral) {
-            if (virSecretObjSaveData(secret) < 0)
+            if (virSecretObjSaveData(obj) < 0)
                 goto restore_backup;
         }
 
-        if (virSecretObjSaveConfig(secret) < 0) {
+        if (virSecretObjSaveConfig(obj) < 0) {
             if (backup && backup->isephemeral) {
                 /* Undo the virSecretObjSaveData() above; ignore errors */
-                virSecretObjDeleteData(secret);
+                virSecretObjDeleteData(obj);
             }
             goto restore_backup;
         }
     } else if (backup && !backup->isephemeral) {
-        if (virSecretObjDeleteConfig(secret) < 0)
+        if (virSecretObjDeleteConfig(obj) < 0)
             goto restore_backup;
 
-        virSecretObjDeleteData(secret);
+        virSecretObjDeleteData(obj);
     }
     /* Saved successfully - drop old values */
     virSecretDefFree(backup);
 
-    event = virSecretEventLifecycleNew(new_attrs->uuid,
-                                       new_attrs->usage_type,
-                                       new_attrs->usage_id,
+    event = virSecretEventLifecycleNew(objDef->uuid,
+                                       objDef->usage_type,
+                                       objDef->usage_id,
                                        VIR_SECRET_EVENT_DEFINED,
                                        0);
 
     ret = virGetSecret(conn,
-                       new_attrs->uuid,
-                       new_attrs->usage_type,
-                       new_attrs->usage_id);
-    new_attrs = NULL;
+                       objDef->uuid,
+                       objDef->usage_type,
+                       objDef->usage_id);
     goto cleanup;
 
  restore_backup:
     /* If we have a backup, then secret was defined before, so just restore
-     * the backup. The current (new_attrs) will be handled below.
-     * Otherwise, this is a new secret, thus remove it.
-     */
-    if (backup)
-        virSecretObjSetDef(secret, backup);
-    else
-        virSecretObjListRemove(driver->secrets, secret);
+     * the backup; otherwise, this is a new secret, thus remove it. */
+    if (backup) {
+        virSecretObjSetDef(obj, backup);
+        VIR_STEAL_PTR(def, objDef);
+    } else {
+        virSecretObjListRemove(driver->secrets, obj);
+        virObjectUnref(obj);
+        obj = NULL;
+    }
 
  cleanup:
-    virSecretDefFree(new_attrs);
-    virSecretObjEndAPI(&secret);
+    virSecretDefFree(def);
+    virSecretObjEndAPI(&obj);
     if (event)
         virObjectEventStateQueue(driver->secretEventState, event);
 
     return ret;
 }
 
+
 static char *
-secretGetXMLDesc(virSecretPtr obj,
+secretGetXMLDesc(virSecretPtr secret,
                  unsigned int flags)
 {
     char *ret = NULL;
-    virSecretObjPtr secret;
+    virSecretObjPtr obj;
     virSecretDefPtr def;
 
     virCheckFlags(0, NULL);
 
-    if (!(secret = secretObjFromSecret(obj)))
+    if (!(obj = secretObjFromSecret(secret)))
         goto cleanup;
 
-    def = virSecretObjGetDef(secret);
-    if (virSecretGetXMLDescEnsureACL(obj->conn, def) < 0)
+    def = virSecretObjGetDef(obj);
+    if (virSecretGetXMLDescEnsureACL(secret->conn, def) < 0)
         goto cleanup;
 
     ret = virSecretDefFormat(def);
 
  cleanup:
-    virSecretObjEndAPI(&secret);
+    virSecretObjEndAPI(&obj);
 
     return ret;
 }
 
+
 static int
-secretSetValue(virSecretPtr obj,
+secretSetValue(virSecretPtr secret,
                const unsigned char *value,
                size_t value_size,
                unsigned int flags)
 {
     int ret = -1;
-    virSecretObjPtr secret;
+    virSecretObjPtr obj;
     virSecretDefPtr def;
     virObjectEventPtr event = NULL;
 
     virCheckFlags(0, -1);
 
-    if (!(secret = secretObjFromSecret(obj)))
+    if (!(obj = secretObjFromSecret(secret)))
         goto cleanup;
 
-    def = virSecretObjGetDef(secret);
-    if (virSecretSetValueEnsureACL(obj->conn, def) < 0)
+    def = virSecretObjGetDef(obj);
+    if (virSecretSetValueEnsureACL(secret->conn, def) < 0)
         goto cleanup;
 
-    if (secretEnsureDirectory() < 0)
-        goto cleanup;
-
-    if (virSecretObjSetValue(secret, value, value_size) < 0)
+    if (virSecretObjSetValue(obj, value, value_size) < 0)
         goto cleanup;
 
     event = virSecretEventValueChangedNew(def->uuid,
@@ -350,30 +339,31 @@ secretSetValue(virSecretPtr obj,
     ret = 0;
 
  cleanup:
-    virSecretObjEndAPI(&secret);
+    virSecretObjEndAPI(&obj);
     if (event)
         virObjectEventStateQueue(driver->secretEventState, event);
 
     return ret;
 }
 
+
 static unsigned char *
-secretGetValue(virSecretPtr obj,
+secretGetValue(virSecretPtr secret,
                size_t *value_size,
                unsigned int flags,
                unsigned int internalFlags)
 {
     unsigned char *ret = NULL;
-    virSecretObjPtr secret;
+    virSecretObjPtr obj;
     virSecretDefPtr def;
 
     virCheckFlags(0, NULL);
 
-    if (!(secret = secretObjFromSecret(obj)))
+    if (!(obj = secretObjFromSecret(secret)))
         goto cleanup;
 
-    def = virSecretObjGetDef(secret);
-    if (virSecretGetValueEnsureACL(obj->conn, def) < 0)
+    def = virSecretObjGetDef(obj);
+    if (virSecretGetValueEnsureACL(secret->conn, def) < 0)
         goto cleanup;
 
     if ((internalFlags & VIR_SECRET_GET_VALUE_INTERNAL_CALL) == 0 &&
@@ -383,33 +373,34 @@ secretGetValue(virSecretPtr obj,
         goto cleanup;
     }
 
-    if (!(ret = virSecretObjGetValue(secret)))
+    if (!(ret = virSecretObjGetValue(obj)))
         goto cleanup;
 
-    *value_size = virSecretObjGetValueSize(secret);
+    *value_size = virSecretObjGetValueSize(obj);
 
  cleanup:
-    virSecretObjEndAPI(&secret);
+    virSecretObjEndAPI(&obj);
 
     return ret;
 }
 
+
 static int
-secretUndefine(virSecretPtr obj)
+secretUndefine(virSecretPtr secret)
 {
     int ret = -1;
-    virSecretObjPtr secret;
+    virSecretObjPtr obj;
     virSecretDefPtr def;
     virObjectEventPtr event = NULL;
 
-    if (!(secret = secretObjFromSecret(obj)))
+    if (!(obj = secretObjFromSecret(secret)))
         goto cleanup;
 
-    def = virSecretObjGetDef(secret);
-    if (virSecretUndefineEnsureACL(obj->conn, def) < 0)
+    def = virSecretObjGetDef(obj);
+    if (virSecretUndefineEnsureACL(secret->conn, def) < 0)
         goto cleanup;
 
-    if (virSecretObjDeleteConfig(secret) < 0)
+    if (virSecretObjDeleteConfig(obj) < 0)
         goto cleanup;
 
     event = virSecretEventLifecycleNew(def->uuid,
@@ -418,19 +409,22 @@ secretUndefine(virSecretPtr obj)
                                        VIR_SECRET_EVENT_UNDEFINED,
                                        0);
 
-    virSecretObjDeleteData(secret);
+    virSecretObjDeleteData(obj);
 
-    virSecretObjListRemove(driver->secrets, secret);
+    virSecretObjListRemove(driver->secrets, obj);
+    virObjectUnref(obj);
+    obj = NULL;
 
     ret = 0;
 
  cleanup:
-    virSecretObjEndAPI(&secret);
+    virSecretObjEndAPI(&obj);
     if (event)
         virObjectEventStateQueue(driver->secretEventState, event);
 
     return ret;
 }
+
 
 static int
 secretStateCleanup(void)
@@ -451,6 +445,7 @@ secretStateCleanup(void)
 
     return 0;
 }
+
 
 static int
 secretStateInitialize(bool privileged,
@@ -481,6 +476,12 @@ secretStateInitialize(bool privileged,
         goto error;
     VIR_FREE(base);
 
+    if (virFileMakePathWithMode(driver->configDir, S_IRWXU) < 0) {
+        virReportSystemError(errno, _("cannot create config directory '%s'"),
+                             driver->configDir);
+        goto error;
+    }
+
     if (!(driver->secrets = virSecretObjListNew()))
         goto error;
 
@@ -497,6 +498,7 @@ secretStateInitialize(bool privileged,
     return -1;
 }
 
+
 static int
 secretStateReload(void)
 {
@@ -510,6 +512,7 @@ secretStateReload(void)
     secretDriverUnlock();
     return 0;
 }
+
 
 static int
 secretConnectSecretEventRegisterAny(virConnectPtr conn,
@@ -532,6 +535,7 @@ secretConnectSecretEventRegisterAny(virConnectPtr conn,
     return callbackID;
 }
 
+
 static int
 secretConnectSecretEventDeregisterAny(virConnectPtr conn,
                                       int callbackID)
@@ -543,7 +547,7 @@ secretConnectSecretEventDeregisterAny(virConnectPtr conn,
 
     if (virObjectEventStateDeregisterID(conn,
                                         driver->secretEventState,
-                                        callbackID) < 0)
+                                        callbackID, true) < 0)
         goto cleanup;
 
     ret = 0;
@@ -575,6 +579,7 @@ static virStateDriver stateDriver = {
     .stateCleanup = secretStateCleanup,
     .stateReload = secretStateReload,
 };
+
 
 int
 secretRegister(void)

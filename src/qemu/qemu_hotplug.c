@@ -329,7 +329,7 @@ qemuDomainAttachVirtioDiskDevice(virConnectPtr conn,
     qemuDomainSecretInfoPtr encinfo;
 
     if (!disk->info.type) {
-        if (qemuDomainMachineIsS390CCW(vm->def) &&
+        if (qemuDomainIsS390CCW(vm->def) &&
             virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_CCW))
             disk->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW;
         else if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_S390))
@@ -497,7 +497,7 @@ int qemuDomainAttachControllerDevice(virQEMUDriverPtr driver,
     }
 
     if (controller->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE) {
-        if (qemuDomainMachineIsS390CCW(vm->def) &&
+        if (qemuDomainIsS390CCW(vm->def) &&
             virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_CCW))
             controller->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW;
         else if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_S390))
@@ -523,7 +523,10 @@ int qemuDomainAttachControllerDevice(virQEMUDriverPtr driver,
     if (qemuAssignDeviceControllerAlias(vm->def, priv->qemuCaps, controller) < 0)
         goto cleanup;
 
-    if (!(devstr = qemuBuildControllerDevStr(vm->def, controller, priv->qemuCaps, NULL)))
+    if (qemuBuildControllerDevStr(vm->def, controller, priv->qemuCaps, &devstr, NULL) < 0)
+        goto cleanup;
+
+    if (!devstr)
         goto cleanup;
 
     if (VIR_REALLOC_N(vm->def->controllers, vm->def->ncontrollers+1) < 0)
@@ -937,6 +940,24 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
 }
 
 
+static void
+qemuDomainNetDeviceVportRemove(virDomainNetDefPtr net)
+{
+    virNetDevVPortProfilePtr vport = virDomainNetGetActualVirtPortProfile(net);
+    const char *brname;
+
+    if (!vport)
+        return;
+
+    if (vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_MIDONET) {
+        ignore_value(virNetDevMidonetUnbindPort(vport));
+    } else if (vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) {
+        brname = virDomainNetGetActualBridgeName(net);
+        ignore_value(virNetDevOpenvswitchRemovePort(brname, net->ifname));
+    }
+}
+
+
 int
 qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
                           virDomainObjPtr vm,
@@ -954,7 +975,6 @@ qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
     size_t queueSize = 0;
     char *nicstr = NULL;
     char *netstr = NULL;
-    virNetDevVPortProfilePtr vport = NULL;
     int ret = -1;
     int vlan;
     bool releaseaddr = false;
@@ -968,7 +988,6 @@ qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
     bool charDevPlugged = false;
     bool netdevPlugged = false;
     bool hostPlugged = false;
-    unsigned int mtu = net->mtu;
 
     /* preallocate new slot for device */
     if (VIR_REALLOC_N(vm->def->nets, vm->def->nnets + 1) < 0)
@@ -1025,7 +1044,7 @@ qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
             goto cleanup;
         memset(vhostfd, -1, sizeof(*vhostfd) * vhostfdSize);
         if (qemuInterfaceBridgeConnect(vm->def, driver, net,
-                                       tapfd, &tapfdSize, &mtu) < 0)
+                                       tapfd, &tapfdSize) < 0)
             goto cleanup;
         iface_connected = true;
         if (qemuInterfaceOpenVhostNet(vm->def, net, priv->qemuCaps,
@@ -1135,13 +1154,17 @@ qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
         }
     }
 
+    if (net->mtu &&
+        virNetDevSetMTU(net->ifname, net->mtu) < 0)
+        goto cleanup;
+
     for (i = 0; i < tapfdSize; i++) {
         if (qemuSecuritySetTapFDLabel(driver->securityManager,
                                       vm->def, tapfd[i]) < 0)
             goto cleanup;
     }
 
-    if (qemuDomainMachineIsS390CCW(vm->def) &&
+    if (qemuDomainIsS390CCW(vm->def) &&
         virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_CCW)) {
         net->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW;
         if (!(ccwaddrs = qemuDomainCCWAddrSetCreateFromDomain(vm->def)))
@@ -1239,7 +1262,7 @@ qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
         VIR_FORCE_CLOSE(vhostfd[i]);
 
     if (!(nicstr = qemuBuildNicDevStr(vm->def, net, vlan, 0,
-                                      queueSize, priv->qemuCaps, mtu)))
+                                      queueSize, priv->qemuCaps)))
         goto try_remove;
 
     qemuDomainObjEnterMonitor(driver, vm);
@@ -1299,16 +1322,7 @@ qemuDomainAttachNetDevice(virQEMUDriverPtr driver,
                                  cfg->stateDir));
             }
 
-            vport = virDomainNetGetActualVirtPortProfile(net);
-            if (vport) {
-                if (vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_MIDONET) {
-                    ignore_value(virNetDevMidonetUnbindPort(vport));
-                } else if (vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) {
-                    ignore_value(virNetDevOpenvswitchRemovePort(
-                                     virDomainNetGetActualBridgeName(net),
-                                     net->ifname));
-                }
-            }
+            qemuDomainNetDeviceVportRemove(net);
         }
 
         virDomainNetRemoveHostdev(vm->def, net);
@@ -1387,6 +1401,7 @@ qemuDomainAttachHostPCIDevice(virQEMUDriverPtr driver,
     qemuDomainObjPrivatePtr priv = vm->privateData;
     virDomainDeviceDef dev = { VIR_DOMAIN_DEVICE_HOSTDEV,
                                { .hostdev = hostdev } };
+    virDomainDeviceInfoPtr info = hostdev->info;
     int ret;
     char *devstr = NULL;
     int configfd = -1;
@@ -1459,8 +1474,15 @@ qemuDomainAttachHostPCIDevice(virQEMUDriverPtr driver,
     if (backend != VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO)
         teardownlabel = true;
 
-    if (qemuAssignDeviceHostdevAlias(vm->def, &hostdev->info->alias, -1) < 0)
+    if (qemuAssignDeviceHostdevAlias(vm->def, &info->alias, -1) < 0)
         goto error;
+
+    if (qemuDomainIsPSeries(vm->def)) {
+        /* Isolation groups are only relevant for pSeries guests */
+        if (qemuDomainFillDeviceIsolationGroup(vm->def, &dev) < 0)
+            goto error;
+    }
+
     if (qemuDomainEnsurePCIAddress(vm, &dev, driver) < 0)
         goto error;
     releaseaddr = true;
@@ -1468,8 +1490,7 @@ qemuDomainAttachHostPCIDevice(virQEMUDriverPtr driver,
         virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_PCI_CONFIGFD)) {
         configfd = qemuOpenPCIConfig(hostdev);
         if (configfd >= 0) {
-            if (virAsprintf(&configfd_name, "fd-%s",
-                            hostdev->info->alias) < 0)
+            if (virAsprintf(&configfd_name, "fd-%s", info->alias) < 0)
                 goto error;
         }
     }
@@ -1514,7 +1535,7 @@ qemuDomainAttachHostPCIDevice(virQEMUDriverPtr driver,
         VIR_WARN("Unable to remove host device from /dev");
 
     if (releaseaddr)
-        qemuDomainReleaseDeviceAddress(vm, hostdev->info, NULL);
+        qemuDomainReleaseDeviceAddress(vm, info, NULL);
 
     qemuHostdevReAttachPCIDevices(driver, vm->def->name, &hostdev, 1);
 
@@ -1531,6 +1552,7 @@ qemuDomainAttachHostPCIDevice(virQEMUDriverPtr driver,
 void
 qemuDomainDelTLSObjects(virQEMUDriverPtr driver,
                         virDomainObjPtr vm,
+                        qemuDomainAsyncJob asyncJob,
                         const char *secAlias,
                         const char *tlsAlias)
 {
@@ -1542,7 +1564,8 @@ qemuDomainDelTLSObjects(virQEMUDriverPtr driver,
 
     orig_err = virSaveLastError();
 
-    qemuDomainObjEnterMonitor(driver, vm);
+    if (qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob) < 0)
+        goto cleanup;
 
     if (tlsAlias)
         ignore_value(qemuMonitorDelObject(priv->mon, tlsAlias));
@@ -1552,6 +1575,7 @@ qemuDomainDelTLSObjects(virQEMUDriverPtr driver,
 
     ignore_value(qemuDomainObjExitMonitor(driver, vm));
 
+ cleanup:
     if (orig_err) {
         virSetError(orig_err);
         virFreeError(orig_err);
@@ -1562,6 +1586,7 @@ qemuDomainDelTLSObjects(virQEMUDriverPtr driver,
 int
 qemuDomainAddTLSObjects(virQEMUDriverPtr driver,
                         virDomainObjPtr vm,
+                        qemuDomainAsyncJob asyncJob,
                         const char *secAlias,
                         virJSONValuePtr *secProps,
                         const char *tlsAlias,
@@ -1574,7 +1599,8 @@ qemuDomainAddTLSObjects(virQEMUDriverPtr driver,
     if (!tlsAlias && !secAlias)
         return 0;
 
-    qemuDomainObjEnterMonitor(driver, vm);
+    if (qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob) < 0)
+        return -1;
 
     if (secAlias) {
         rc = qemuMonitorAddObject(priv->mon, "secret",
@@ -1601,7 +1627,7 @@ qemuDomainAddTLSObjects(virQEMUDriverPtr driver,
         virSetError(orig_err);
         virFreeError(orig_err);
     }
-    qemuDomainDelTLSObjects(driver, vm, secAlias, tlsAlias);
+    qemuDomainDelTLSObjects(driver, vm, asyncJob, secAlias, tlsAlias);
 
     return -1;
 }
@@ -1682,8 +1708,8 @@ qemuDomainAddChardevTLSObjects(virConnectPtr conn,
         goto cleanup;
     dev->data.tcp.tlscreds = true;
 
-    if (qemuDomainAddTLSObjects(driver, vm, *secAlias, &secProps,
-                                *tlsAlias, &tlsProps) < 0)
+    if (qemuDomainAddTLSObjects(driver, vm, QEMU_ASYNC_JOB_NONE,
+                                *secAlias, &secProps, *tlsAlias, &tlsProps) < 0)
         goto cleanup;
 
     ret = 0;
@@ -1703,7 +1729,6 @@ int qemuDomainAttachRedirdevDevice(virConnectPtr conn,
                                    virDomainRedirdevDefPtr redirdev)
 {
     int ret = -1;
-    int rc;
     qemuDomainObjPrivatePtr priv = vm->privateData;
     virDomainDefPtr def = vm->def;
     char *charAlias = NULL;
@@ -1720,10 +1745,9 @@ int qemuDomainAttachRedirdevDevice(virConnectPtr conn,
     if (!(charAlias = qemuAliasChardevFromDevAlias(redirdev->info.alias)))
         goto cleanup;
 
-    if ((rc = virDomainUSBAddressEnsure(priv->usbaddrs, &redirdev->info)) < 0)
+    if ((virDomainUSBAddressEnsure(priv->usbaddrs, &redirdev->info)) < 0)
         goto cleanup;
-    if (rc == 1)
-        need_release = true;
+    need_release = true;
 
     if (!(devstr = qemuBuildRedirdevDevStr(def, redirdev, priv->qemuCaps)))
         goto cleanup;
@@ -1773,7 +1797,8 @@ int qemuDomainAttachRedirdevDevice(virConnectPtr conn,
         virSetError(orig_err);
         virFreeError(orig_err);
     }
-    qemuDomainDelTLSObjects(driver, vm, secAlias, tlsAlias);
+    qemuDomainDelTLSObjects(driver, vm, QEMU_ASYNC_JOB_NONE,
+                            secAlias, tlsAlias);
     goto audit;
 }
 
@@ -1797,15 +1822,17 @@ qemuDomainChrPreInsert(virDomainDefPtr vmdef,
     if (virDomainChrPreAlloc(vmdef, chr) < 0)
         return -1;
 
-    /* Due to some crazy backcompat stuff, the first serial device is an alias
-     * to the first console too. If this is the case, the definition must be
-     * duplicated as first console device. */
+    /* Due to historical reasons, the first console is an alias to the
+     * first serial device (if such exists). If this is the case, we need to
+     * create an object for the first console as well.
+     */
     if (vmdef->nserials == 0 && vmdef->nconsoles == 0 &&
         chr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_SERIAL) {
         if (!vmdef->consoles && VIR_ALLOC(vmdef->consoles) < 0)
             return -1;
 
-        if (VIR_ALLOC(vmdef->consoles[0]) < 0) {
+        /* We'll be dealing with serials[0] directly, so NULL is fine here. */
+        if (!(vmdef->consoles[0] = virDomainChrDefNew(NULL))) {
             VIR_FREE(vmdef->consoles);
             return -1;
         }
@@ -1836,7 +1863,7 @@ qemuDomainChrInsertPreAllocCleanup(virDomainDefPtr vmdef,
     /* Remove the stub console added by qemuDomainChrPreInsert */
     if (vmdef->nserials == 0 && vmdef->nconsoles == 1 &&
         chr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_SERIAL) {
-        VIR_FREE(vmdef->consoles[0]);
+        virDomainChrDefFree(vmdef->consoles[0]);
         VIR_FREE(vmdef->consoles);
         vmdef->nconsoles = 0;
     }
@@ -2034,7 +2061,8 @@ int qemuDomainAttachChrDevice(virConnectPtr conn,
         virFreeError(orig_err);
     }
 
-    qemuDomainDelTLSObjects(driver, vm, secAlias, tlsAlias);
+    qemuDomainDelTLSObjects(driver, vm, QEMU_ASYNC_JOB_NONE,
+                            secAlias, tlsAlias);
     goto audit;
 }
 
@@ -2072,7 +2100,7 @@ qemuDomainAttachRNGDevice(virConnectPtr conn,
         goto cleanup;
 
     if (rng->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE) {
-        if (qemuDomainMachineIsS390CCW(vm->def) &&
+        if (qemuDomainIsS390CCW(vm->def) &&
             virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_CCW)) {
             rng->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW;
         } else if (virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_S390)) {
@@ -2083,7 +2111,6 @@ qemuDomainAttachRNGDevice(virConnectPtr conn,
                                             rng->source.file))
             goto cleanup;
     }
-    releaseaddr = true;
 
     if (rng->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE ||
         rng->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI) {
@@ -2096,6 +2123,7 @@ qemuDomainAttachRNGDevice(virConnectPtr conn,
                                       !rng->info.addr.ccw.assigned) < 0)
             goto cleanup;
     }
+    releaseaddr = true;
 
     if (qemuDomainNamespaceSetupRNG(driver, vm, rng) < 0)
         goto cleanup;
@@ -2186,7 +2214,8 @@ qemuDomainAttachRNGDevice(virConnectPtr conn,
         virFreeError(orig_err);
     }
 
-    qemuDomainDelTLSObjects(driver, vm, secAlias, tlsAlias);
+    qemuDomainDelTLSObjects(driver, vm, QEMU_ASYNC_JOB_NONE,
+                            secAlias, tlsAlias);
     goto audit;
 }
 
@@ -2245,6 +2274,9 @@ qemuDomainAttachMemory(virQEMUDriverPtr driver,
 
     if (qemuBuildMemoryBackendStr(&props, &backendType, cfg,
                                   priv->qemuCaps, vm->def, mem, NULL, true) < 0)
+        goto cleanup;
+
+    if (qemuProcessBuildDestroyHugepagesPath(driver, vm, mem, true) < 0)
         goto cleanup;
 
     if (qemuDomainNamespaceSetupMemory(driver, vm, mem) < 0)
@@ -2459,23 +2491,8 @@ qemuDomainAttachHostSCSIDevice(virConnectPtr conn,
             return -1;
     }
 
-    if (qemuHostdevPrepareSCSIDevices(driver, vm->def->name,
-                                      &hostdev, 1)) {
-        virDomainHostdevSubsysSCSIPtr scsisrc = &hostdev->source.subsys.u.scsi;
-        if (scsisrc->protocol == VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_ISCSI) {
-            virDomainHostdevSubsysSCSIiSCSIPtr iscsisrc = &scsisrc->u.iscsi;
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Unable to prepare scsi hostdev for iSCSI: %s"),
-                           iscsisrc->path);
-        } else {
-            virDomainHostdevSubsysSCSIHostPtr scsihostsrc = &scsisrc->u.host;
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("Unable to prepare scsi hostdev: %s:%u:%u:%llu"),
-                           scsihostsrc->adapter, scsihostsrc->bus,
-                           scsihostsrc->target, scsihostsrc->unit);
-        }
+    if (qemuHostdevPrepareSCSIDevices(driver, vm->def->name, &hostdev, 1) < 0)
         return -1;
-    }
 
     if (qemuDomainNamespaceSetupHostdev(driver, vm, hostdev) < 0)
         goto cleanup;
@@ -2585,13 +2602,8 @@ qemuDomainAttachSCSIVHostDevice(virQEMUDriverPtr driver,
         return -1;
     }
 
-    if (qemuHostdevPrepareSCSIVHostDevices(driver, vm->def->name, &hostdev, 1) < 0) {
-        virDomainHostdevSubsysSCSIVHostPtr hostsrc = &hostdev->source.subsys.u.scsi_host;
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("Unable to prepare scsi_host hostdev: %s"),
-                       hostsrc->wwpn);
+    if (qemuHostdevPrepareSCSIVHostDevices(driver, vm->def->name, &hostdev, 1) < 0)
         return -1;
-    }
 
     if (qemuDomainNamespaceSetupHostdev(driver, vm, hostdev) < 0)
         goto cleanup;
@@ -2612,7 +2624,7 @@ qemuDomainAttachSCSIVHostDevice(virQEMUDriverPtr driver,
         goto cleanup;
 
     if (hostdev->info->type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE) {
-        if (qemuDomainMachineIsS390CCW(vm->def) &&
+        if (qemuDomainIsS390CCW(vm->def) &&
             virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_CCW))
             hostdev->info->type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW;
     }
@@ -2686,7 +2698,7 @@ qemuDomainAttachHostDevice(virConnectPtr conn,
 {
     if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("hostdev mode '%s' not supported"),
+                       _("hotplug is not supported for hostdev mode '%s'"),
                        virDomainHostdevModeTypeToString(hostdev->mode));
         return -1;
     }
@@ -2717,7 +2729,7 @@ qemuDomainAttachHostDevice(virConnectPtr conn,
 
     default:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("hostdev subsys type '%s' not supported"),
+                       _("hotplug is not supported for hostdev subsys type '%s'"),
                        virDomainHostdevSubsysTypeToString(hostdev->source.subsys.type));
         goto error;
     }
@@ -2754,7 +2766,7 @@ qemuDomainAttachShmemDevice(virQEMUDriverPtr driver,
         virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
                        _("live attach of shmem model '%s' is not supported"),
                        virDomainShmemModelTypeToString(shmem->model));
-        /* fall-through */
+        ATTRIBUTE_FALLTHROUGH;
     case VIR_DOMAIN_SHMEM_MODEL_LAST:
         return -1;
     }
@@ -2992,6 +3004,8 @@ qemuDomainChangeNet(virQEMUDriverPtr driver,
     bool needLinkStateChange = false;
     bool needReplaceDevDef = false;
     bool needBandwidthSet = false;
+    bool needCoalesceChange = false;
+    bool needVlanUpdate = false;
     int ret = -1;
     int changeidx = -1;
 
@@ -3053,6 +3067,8 @@ qemuDomainChangeNet(virQEMUDriverPtr driver,
          olddev->driver.virtio.ioeventfd != newdev->driver.virtio.ioeventfd ||
          olddev->driver.virtio.event_idx != newdev->driver.virtio.event_idx ||
          olddev->driver.virtio.queues != newdev->driver.virtio.queues ||
+         olddev->driver.virtio.rx_queue_size != newdev->driver.virtio.rx_queue_size ||
+         olddev->driver.virtio.tx_queue_size != newdev->driver.virtio.tx_queue_size ||
          olddev->driver.virtio.host.csum != newdev->driver.virtio.host.csum ||
          olddev->driver.virtio.host.gso != newdev->driver.virtio.host.gso ||
          olddev->driver.virtio.host.tso4 != newdev->driver.virtio.host.tso4 ||
@@ -3144,6 +3160,12 @@ qemuDomainChangeNet(virQEMUDriverPtr driver,
     /* bandwidth can be modified, and will be checked later */
     /* vlan can be modified, and will be checked later */
     /* linkstate can be modified */
+
+    if (olddev->mtu != newdev->mtu) {
+        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                       _("cannot modify MTU"));
+        goto cleanup;
+    }
 
     /* allocate new actual device to compare to old - we will need to
      * free it if we fail for any reason
@@ -3265,12 +3287,15 @@ qemuDomainChangeNet(virQEMUDriverPtr driver,
 
     if (STRNEQ_NULLABLE(virDomainNetGetActualDirectDev(olddev),
                         virDomainNetGetActualDirectDev(newdev)) ||
-        virDomainNetGetActualDirectMode(olddev) != virDomainNetGetActualDirectMode(olddev) ||
+        virDomainNetGetActualDirectMode(olddev) != virDomainNetGetActualDirectMode(newdev) ||
         !virNetDevVPortProfileEqual(virDomainNetGetActualVirtPortProfile(olddev),
-                                    virDomainNetGetActualVirtPortProfile(newdev)) ||
-        !virNetDevVlanEqual(virDomainNetGetActualVlan(olddev),
-                            virDomainNetGetActualVlan(newdev))) {
+                                    virDomainNetGetActualVirtPortProfile(newdev))) {
         needReconnect = true;
+    }
+
+    if (!virNetDevVlanEqual(virDomainNetGetActualVlan(olddev),
+                             virDomainNetGetActualVlan(newdev))) {
+        needVlanUpdate = true;
     }
 
     if (olddev->linkstate != newdev->linkstate)
@@ -3279,6 +3304,12 @@ qemuDomainChangeNet(virQEMUDriverPtr driver,
     if (!virNetDevBandwidthEqual(virDomainNetGetActualBandwidth(olddev),
                                  virDomainNetGetActualBandwidth(newdev)))
         needBandwidthSet = true;
+
+    if (!!olddev->coalesce != !!newdev->coalesce ||
+        (olddev->coalesce && newdev->coalesce &&
+         memcmp(olddev->coalesce, newdev->coalesce,
+                sizeof(*olddev->coalesce))))
+        needCoalesceChange = true;
 
     /* FINALLY - actually perform the required actions */
 
@@ -3315,9 +3346,21 @@ qemuDomainChangeNet(virQEMUDriverPtr driver,
         needReplaceDevDef = true;
     }
 
+    if (needCoalesceChange) {
+        if (virNetDevSetCoalesce(newdev->ifname, newdev->coalesce, true) < 0)
+            goto cleanup;
+        needReplaceDevDef = true;
+    }
+
     if (needLinkStateChange &&
         qemuDomainChangeNetLinkState(driver, vm, olddev, newdev->linkstate) < 0) {
         goto cleanup;
+    }
+
+    if (needVlanUpdate) {
+        if (virNetDevOpenvswitchUpdateVlan(newdev->ifname, &newdev->vlan) < 0)
+            goto cleanup;
+        needReplaceDevDef = true;
     }
 
     if (needReplaceDevDef) {
@@ -3907,6 +3950,8 @@ qemuDomainRemoveHostDevice(virQEMUDriverPtr driver,
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST:
         qemuDomainRemoveSCSIVHostDevice(driver, vm, hostdev);
         break;
+    case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV:
+        break;
     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_LAST:
         break;
     }
@@ -3934,7 +3979,6 @@ qemuDomainRemoveNetDevice(virQEMUDriverPtr driver,
 {
     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
     qemuDomainObjPrivatePtr priv = vm->privateData;
-    virNetDevVPortProfilePtr vport;
     virObjectEventPtr event;
     char *hostnet_name = NULL;
     char *charDevAlias = NULL;
@@ -4023,16 +4067,7 @@ qemuDomainRemoveNetDevice(virQEMUDriverPtr driver,
                          cfg->stateDir));
     }
 
-    vport = virDomainNetGetActualVirtPortProfile(net);
-    if (vport) {
-        if (vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_MIDONET) {
-            ignore_value(virNetDevMidonetUnbindPort(vport));
-        } else if (vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) {
-            ignore_value(virNetDevOpenvswitchRemovePort(
-                             virDomainNetGetActualBridgeName(net),
-                             net->ifname));
-        }
-    }
+    qemuDomainNetDeviceVportRemove(net);
 
     networkReleaseActualDevice(vm->def, net);
     virDomainNetDefFree(net);
@@ -4437,7 +4472,7 @@ qemuDomainDetachVirtioDiskDevice(virQEMUDriverPtr driver,
         goto cleanup;
     }
 
-    if (qemuDomainMachineIsS390CCW(vm->def) &&
+    if (qemuDomainIsS390CCW(vm->def) &&
         virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_CCW)) {
         if (!virDomainDeviceAddressIsValid(&detach->info,
                                            VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW)) {
@@ -4830,7 +4865,7 @@ qemuDomainDetachThisHostDevice(virQEMUDriverPtr driver,
         break;
     default:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("hostdev subsys type '%s' not supported"),
+                       _("hot unplug is not supported for hostdev subsys type '%s'"),
                        virDomainHostdevSubsysTypeToString(detach->source.subsys.type));
         return -1;
     }
@@ -4862,7 +4897,7 @@ int qemuDomainDetachHostDevice(virQEMUDriverPtr driver,
 
     if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("hostdev mode '%s' not supported"),
+                       _("hot unplug is not supported for hostdev mode '%s'"),
                        virDomainHostdevModeTypeToString(hostdev->mode));
         return -1;
     }
@@ -4952,7 +4987,7 @@ qemuDomainDetachShmemDevice(virQEMUDriverPtr driver,
         virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
                        _("live detach of shmem model '%s' is not supported"),
                        virDomainShmemModelTypeToString(shmem->model));
-        /* fall-through */
+        ATTRIBUTE_FALLTHROUGH;
     case VIR_DOMAIN_SHMEM_MODEL_LAST:
         return -1;
     }
@@ -4992,12 +5027,11 @@ qemuDomainDetachNetDevice(virQEMUDriverPtr driver,
     detach = vm->def->nets[detachidx];
 
     if (virDomainNetGetActualType(detach) == VIR_DOMAIN_NET_TYPE_HOSTDEV) {
-        /* coverity[negative_returns] */
         ret = qemuDomainDetachThisHostDevice(driver, vm,
                                              virDomainNetGetActualHostdev(detach));
         goto cleanup;
     }
-    if (qemuDomainMachineIsS390CCW(vm->def) &&
+    if (qemuDomainIsS390CCW(vm->def) &&
         virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_VIRTIO_CCW)) {
         if (!virDomainDeviceAddressIsValid(&detach->info,
                                            VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW)) {
@@ -5236,7 +5270,7 @@ qemuDomainDetachRNGDevice(virQEMUDriverPtr driver,
     int rc;
     int ret = -1;
 
-    if ((idx = virDomainRNGFind(vm->def, rng) < 0)) {
+    if ((idx = virDomainRNGFind(vm->def, rng)) < 0) {
         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
                        _("device not present in domain configuration"));
         return -1;
@@ -5374,8 +5408,9 @@ qemuDomainRemoveVcpuAlias(virQEMUDriverPtr driver,
 }
 
 
-int
+static int
 qemuDomainHotplugDelVcpu(virQEMUDriverPtr driver,
+                         virQEMUDriverConfigPtr cfg,
                          virDomainObjPtr vm,
                          unsigned int vcpu)
 {
@@ -5417,6 +5452,11 @@ qemuDomainHotplugDelVcpu(virQEMUDriverPtr driver,
     if (qemuDomainRemoveVcpu(driver, vm, vcpu) < 0)
         goto cleanup;
 
+    qemuDomainVcpuPersistOrder(vm->def);
+
+    if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0)
+        goto cleanup;
+
     ret = 0;
 
  cleanup:
@@ -5427,6 +5467,7 @@ qemuDomainHotplugDelVcpu(virQEMUDriverPtr driver,
 
 static int
 qemuDomainHotplugAddVcpu(virQEMUDriverPtr driver,
+                         virQEMUDriverConfigPtr cfg,
                          virDomainObjPtr vm,
                          unsigned int vcpu)
 {
@@ -5485,6 +5526,11 @@ qemuDomainHotplugAddVcpu(virQEMUDriverPtr driver,
     }
 
     if (qemuDomainValidateVcpuInfo(vm) < 0)
+        goto cleanup;
+
+    qemuDomainVcpuPersistOrder(vm->def);
+
+    if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0)
         goto cleanup;
 
     ret = 0;
@@ -5601,7 +5647,6 @@ qemuDomainSetVcpusLive(virQEMUDriverPtr driver,
     qemuDomainObjPrivatePtr priv = vm->privateData;
     qemuCgroupEmulatorAllNodesDataPtr emulatorCgroup = NULL;
     ssize_t nextvcpu = -1;
-    int rc = 0;
     int ret = -1;
 
     if (qemuCgroupEmulatorAllNodesAllow(priv->cgroup, &emulatorCgroup) < 0)
@@ -5609,26 +5654,18 @@ qemuDomainSetVcpusLive(virQEMUDriverPtr driver,
 
     if (enable) {
         while ((nextvcpu = virBitmapNextSetBit(vcpumap, nextvcpu)) != -1) {
-            if ((rc = qemuDomainHotplugAddVcpu(driver, vm, nextvcpu)) < 0)
-                break;
+            if (qemuDomainHotplugAddVcpu(driver, cfg, vm, nextvcpu) < 0)
+                goto cleanup;
         }
     } else {
         for (nextvcpu = virDomainDefGetVcpusMax(vm->def) - 1; nextvcpu >= 0; nextvcpu--) {
             if (!virBitmapIsBitSet(vcpumap, nextvcpu))
                 continue;
 
-            if ((rc = qemuDomainHotplugDelVcpu(driver, vm, nextvcpu)) < 0)
-                break;
+            if (qemuDomainHotplugDelVcpu(driver, cfg, vm, nextvcpu) < 0)
+                goto cleanup;
         }
     }
-
-    qemuDomainVcpuPersistOrder(vm->def);
-
-    if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0)
-        goto cleanup;
-
-    if (rc < 0)
-        goto cleanup;
 
     ret = 0;
 
@@ -5774,13 +5811,15 @@ qemuDomainSetVcpuConfig(virDomainDefPtr def,
 
     def->individualvcpus = true;
 
-    while ((next = virBitmapNextSetBit(map, next)) > 0) {
+    /* ordering information may become invalid, thus clear it */
+    virDomainDefVcpuOrderClear(def);
+
+    while ((next = virBitmapNextSetBit(map, next)) >= 0) {
         if (!(vcpu = virDomainDefGetVcpu(def, next)))
             continue;
 
         vcpu->online = state;
         vcpu->hotpluggable = VIR_TRISTATE_BOOL_YES;
-        vcpu->order = 0;
     }
 }
 
@@ -5807,19 +5846,19 @@ qemuDomainFilterHotplugVcpuEntities(virDomainDefPtr def,
         return NULL;
 
     /* make sure that all selected vcpus are in the correct state */
-    while ((next = virBitmapNextSetBit(map, next)) > 0) {
+    while ((next = virBitmapNextSetBit(map, next)) >= 0) {
         if (!(vcpu = virDomainDefGetVcpu(def, next)))
             continue;
 
         if (vcpu->online == state) {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("vcpu '%zu' is already in requested state"), next);
+                           _("vcpu '%zd' is already in requested state"), next);
             goto cleanup;
         }
 
         if (vcpu->online && !vcpu->hotpluggable) {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("vcpu '%zu' can't be hotunplugged"), next);
+                           _("vcpu '%zd' can't be hotunplugged"), next);
             goto cleanup;
         }
     }
@@ -5827,7 +5866,7 @@ qemuDomainFilterHotplugVcpuEntities(virDomainDefPtr def,
     /* Make sure that all vCPUs belonging to a single hotpluggable entity were
      * selected and then de-select any sub-threads of it. */
     next = -1;
-    while ((next = virBitmapNextSetBit(map, next)) > 0) {
+    while ((next = virBitmapNextSetBit(map, next)) >= 0) {
         if (!(vcpu = virDomainDefGetVcpu(def, next)))
             continue;
 
@@ -5835,7 +5874,7 @@ qemuDomainFilterHotplugVcpuEntities(virDomainDefPtr def,
 
         if (vcpupriv->vcpus == 0) {
             virReportError(VIR_ERR_INVALID_ARG,
-                           _("vcpu '%zu' belongs to a larger hotpluggable entity, "
+                           _("vcpu '%zd' belongs to a larger hotpluggable entity, "
                              "but siblings were not selected"), next);
             goto cleanup;
         }
@@ -5844,7 +5883,7 @@ qemuDomainFilterHotplugVcpuEntities(virDomainDefPtr def,
             if (!virBitmapIsBitSet(map, i)) {
                 virReportError(VIR_ERR_INVALID_ARG,
                                _("vcpu '%zu' was not selected but it belongs to "
-                                 "hotpluggable entity '%zu-%zu' which was "
+                                 "hotpluggable entity '%zd-%zd' which was "
                                  "partially selected"),
                                i, next, next + vcpupriv->vcpus - 1);
                 goto cleanup;
@@ -5860,6 +5899,47 @@ qemuDomainFilterHotplugVcpuEntities(virDomainDefPtr def,
  cleanup:
     virBitmapFree(map);
     return ret;
+}
+
+
+static int
+qemuDomainVcpuValidateConfig(virDomainDefPtr def,
+                             virBitmapPtr map)
+{
+    virDomainVcpuDefPtr vcpu;
+    size_t maxvcpus = virDomainDefGetVcpusMax(def);
+    ssize_t next;
+    ssize_t firstvcpu = -1;
+
+    /* vcpu 0 can't be modified */
+    if (virBitmapIsBitSet(map, 0)) {
+        virReportError(VIR_ERR_INVALID_ARG, "%s",
+                       _("vCPU '0' can't be modified"));
+        return -1;
+    }
+
+    /* non-hotpluggable vcpus need to stay clustered starting from vcpu 0 */
+    for (next = virBitmapNextSetBit(map, -1) + 1; next < maxvcpus; next++) {
+        if (!(vcpu = virDomainDefGetVcpu(def, next)))
+            continue;
+
+        /* skip vcpus being modified */
+        if (virBitmapIsBitSet(map, next)) {
+            if (firstvcpu < 0)
+                firstvcpu = next;
+
+            continue;
+        }
+
+        if (vcpu->online && vcpu->hotpluggable == VIR_TRISTATE_BOOL_NO) {
+            virReportError(VIR_ERR_INVALID_ARG,
+                           _("vcpu '%zd' can't be modified as it is followed "
+                             "by non-hotpluggable online vcpus"), firstvcpu);
+            return -1;
+        }
+    }
+
+    return 0;
 }
 
 
@@ -5895,6 +5975,11 @@ qemuDomainSetVcpuInternal(virQEMUDriverPtr driver,
                            _("only one hotpluggable entity can be selected"));
             goto cleanup;
         }
+    }
+
+    if (persistentDef) {
+        if (qemuDomainVcpuValidateConfig(persistentDef, map) < 0)
+            goto cleanup;
     }
 
     if (livevcpus &&

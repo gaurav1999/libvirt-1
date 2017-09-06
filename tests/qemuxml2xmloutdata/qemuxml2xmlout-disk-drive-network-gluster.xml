@@ -13,7 +13,7 @@
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
   <devices>
-    <emulator>/usr/bin/qemu</emulator>
+    <emulator>/usr/bin/qemu-system-i686</emulator>
     <disk type='network' device='disk'>
       <driver name='qemu' type='raw'/>
       <source protocol='gluster' name='Volume1/Image'>
@@ -34,7 +34,7 @@
       <driver name='qemu' type='qcow2'/>
       <source protocol='gluster' name='Volume3/Image.qcow2'>
         <host name='example.org' port='6000'/>
-        <host name='example.org'/>
+        <host name='example.org' port='24007'/>
         <host transport='unix' socket='/path/to/sock'/>
       </source>
       <target dev='vdc' bus='virtio'/>

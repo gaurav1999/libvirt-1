@@ -67,7 +67,7 @@
 #include "stat-time.h"
 #include "virstring.h"
 #include "virxml.h"
-#include "fdstream.h"
+#include "virfdstream.h"
 
 #define VIR_FROM_THIS VIR_FROM_STORAGE
 
@@ -1982,7 +1982,7 @@ virStorageBackendStablePath(virStoragePoolObjPtr pool,
     while ((direrr = virDirRead(dh, &dent, NULL)) > 0) {
         if (virAsprintf(&stablepath, "%s/%s",
                         pool->def->target.path,
-                        dent->d_name) == -1) {
+                        dent->d_name) < 0) {
             VIR_DIR_CLOSE(dh);
             return NULL;
         }
@@ -2082,7 +2082,7 @@ virStorageBackendVolCreateLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
     VIR_FREE(vol->target.path);
     if (virAsprintf(&vol->target.path, "%s/%s",
                     pool->def->target.path,
-                    vol->name) == -1)
+                    vol->name) < 0)
         return -1;
 
     if (virFileExists(vol->target.path)) {
@@ -2401,8 +2401,9 @@ virStorageBackendVolUploadLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
     char *target_path = vol->target.path;
     int ret = -1;
     int has_snap = 0;
+    bool sparse = flags & VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM;
 
-    virCheckFlags(0, -1);
+    virCheckFlags(VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM, -1);
     /* if volume has target format VIR_STORAGE_FILE_PLOOP
      * we need to restore DiskDescriptor.xml, according to
      * new contents of volume. This operation will be perfomed
@@ -2427,7 +2428,7 @@ virStorageBackendVolUploadLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
     /* Not using O_CREAT because the file is required to already exist at
      * this point */
     ret = virFDStreamOpenBlockDevice(stream, target_path,
-                                     offset, len, O_WRONLY);
+                                     offset, len, sparse, O_WRONLY);
 
  cleanup:
     VIR_FREE(path);
@@ -2447,8 +2448,9 @@ virStorageBackendVolDownloadLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
     char *target_path = vol->target.path;
     int ret = -1;
     int has_snap = 0;
+    bool sparse = flags & VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM;
 
-    virCheckFlags(0, -1);
+    virCheckFlags(VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM, -1);
     if (vol->target.format == VIR_STORAGE_FILE_PLOOP) {
         has_snap = storageBackendPloopHasSnapshots(vol->target.path);
         if (has_snap < 0) {
@@ -2465,7 +2467,7 @@ virStorageBackendVolDownloadLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
     }
 
     ret = virFDStreamOpenBlockDevice(stream, target_path,
-                                     offset, len, O_RDONLY);
+                                     offset, len, sparse, O_RDONLY);
 
  cleanup:
     VIR_FREE(path);
@@ -2516,25 +2518,37 @@ static int
 storageBackendWipeLocal(const char *path,
                         int fd,
                         unsigned long long wipe_len,
-                        size_t writebuf_length)
+                        size_t writebuf_length,
+                        bool zero_end)
 {
     int ret = -1, written = 0;
     unsigned long long remaining = 0;
+    off_t size;
     size_t write_size = 0;
     char *writebuf = NULL;
-
-    VIR_DEBUG("wiping start: 0 len: %llu", wipe_len);
 
     if (VIR_ALLOC_N(writebuf, writebuf_length) < 0)
         goto cleanup;
 
-    if (lseek(fd, 0, SEEK_SET) < 0) {
-        virReportSystemError(errno,
-                             _("Failed to seek to the start in volume "
-                               "with path '%s'"),
-                             path);
-        goto cleanup;
+    if (!zero_end) {
+        if ((size = lseek(fd, 0, SEEK_SET)) < 0) {
+            virReportSystemError(errno,
+                                 _("Failed to seek to the start in volume "
+                                   "with path '%s'"),
+                                 path);
+            goto cleanup;
+        }
+    } else {
+        if ((size = lseek(fd, -wipe_len, SEEK_END)) < 0) {
+            virReportSystemError(errno,
+                                 _("Failed to seek to %llu bytes to the end "
+                                   "in volume with path '%s'"),
+                                 wipe_len, path);
+            goto cleanup;
+        }
     }
+
+    VIR_DEBUG("wiping start: %zd len: %llu", (ssize_t) size, wipe_len);
 
     remaining = wipe_len;
     while (remaining > 0) {
@@ -2573,7 +2587,8 @@ storageBackendWipeLocal(const char *path,
 static int
 storageBackendVolWipeLocalFile(const char *path,
                                unsigned int algorithm,
-                               unsigned long long allocation)
+                               unsigned long long allocation,
+                               bool zero_end)
 {
     int ret = -1, fd = -1;
     const char *alg_char = NULL;
@@ -2648,7 +2663,8 @@ storageBackendVolWipeLocalFile(const char *path,
         if (S_ISREG(st.st_mode) && st.st_blocks < (st.st_size / DEV_BSIZE)) {
             ret = storageBackendVolZeroSparseFileLocal(path, st.st_size, fd);
         } else {
-            ret = storageBackendWipeLocal(path, fd, allocation, st.st_blksize);
+            ret = storageBackendWipeLocal(path, fd, allocation, st.st_blksize,
+                                          zero_end);
         }
         if (ret < 0)
             goto cleanup;
@@ -2686,7 +2702,7 @@ storageBackendVolWipePloop(virStorageVolDefPtr vol,
         goto cleanup;
 
     if (storageBackendVolWipeLocalFile(target_path, algorithm,
-                                       vol->target.allocation) < 0)
+                                       vol->target.allocation, false) < 0)
         goto cleanup;
 
     if (virFileRemove(disk_desc, 0, 0) < 0) {
@@ -2735,7 +2751,7 @@ virStorageBackendVolWipeLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
         ret = storageBackendVolWipePloop(vol, algorithm);
     } else {
         ret = storageBackendVolWipeLocalFile(vol->target.path, algorithm,
-                                             vol->target.allocation);
+                                             vol->target.allocation, false);
     }
 
     return ret;
@@ -2836,32 +2852,96 @@ virStorageBackendDeleteLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
 }
 
 
+int
+virStorageUtilGlusterExtractPoolSources(const char *host,
+                                        const char *xml,
+                                        virStoragePoolSourceListPtr list,
+                                        virStoragePoolType pooltype)
+{
+    xmlDocPtr doc = NULL;
+    xmlXPathContextPtr ctxt = NULL;
+    xmlNodePtr *nodes = NULL;
+    virStoragePoolSource *src = NULL;
+    char *volname = NULL;
+    size_t i;
+    int nnodes;
+    int ret = -1;
+
+    if (!(doc = virXMLParseStringCtxt(xml, _("(gluster_cli_output)"), &ctxt)))
+        goto cleanup;
+
+    if ((nnodes = virXPathNodeSet("//volumes/volume", ctxt, &nodes)) < 0)
+        goto cleanup;
+
+    for (i = 0; i < nnodes; i++) {
+        ctxt->node = nodes[i];
+
+        if (!(src = virStoragePoolSourceListNewSource(list)))
+            goto cleanup;
+
+        if (!(volname = virXPathString("string(./name)", ctxt))) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("failed to extract gluster volume name"));
+            goto cleanup;
+        }
+
+        if (pooltype == VIR_STORAGE_POOL_NETFS) {
+            src->format = VIR_STORAGE_POOL_NETFS_GLUSTERFS;
+            VIR_STEAL_PTR(src->dir, volname);
+        } else if (pooltype == VIR_STORAGE_POOL_GLUSTER) {
+            if (VIR_STRDUP(src->dir, "/") < 0)
+                goto cleanup;
+            VIR_STEAL_PTR(src->name, volname);
+        } else {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("unsupported gluster lookup"));
+            goto cleanup;
+        }
+
+        if (VIR_ALLOC_N(src->hosts, 1) < 0)
+            goto cleanup;
+        src->nhost = 1;
+
+        if (VIR_STRDUP(src->hosts[0].name, host) < 0)
+            goto cleanup;
+    }
+
+    ret = nnodes;
+
+ cleanup:
+    VIR_FREE(volname);
+    VIR_FREE(nodes);
+    xmlXPathFreeContext(ctxt);
+    xmlFreeDoc(doc);
+
+    return ret;
+}
+
+
 /**
  * virStorageBackendFindGlusterPoolSources:
  * @host: host to detect volumes on
- * @pooltype: src->format is set to this value
+ * @pooltype: type of the pool
  * @list: list of storage pool sources to be filled
  * @report: report error if the 'gluster' cli tool is missing
  *
  * Looks up gluster volumes on @host and fills them to @list.
  *
+ * @pooltype allows to influence the specific differences between netfs and
+ * native gluster pools. Users should pass only VIR_STORAGE_POOL_NETFS or
+ * VIR_STORAGE_POOL_GLUSTER.
+ *
  * Returns number of volumes on the host on success, or -1 on error.
  */
 int
 virStorageBackendFindGlusterPoolSources(const char *host,
-                                        int pooltype,
+                                        virStoragePoolType pooltype,
                                         virStoragePoolSourceListPtr list,
                                         bool report)
 {
     char *glusterpath = NULL;
     char *outbuf = NULL;
     virCommandPtr cmd = NULL;
-    xmlDocPtr doc = NULL;
-    xmlXPathContextPtr ctxt = NULL;
-    xmlNodePtr *nodes = NULL;
-    virStoragePoolSource *src = NULL;
-    size_t i;
-    int nnodes;
     int rc;
 
     int ret = -1;
@@ -2892,41 +2972,9 @@ virStorageBackendFindGlusterPoolSources(const char *host,
         goto cleanup;
     }
 
-    if (!(doc = virXMLParseStringCtxt(outbuf, _("(gluster_cli_output)"),
-                                      &ctxt)))
-        goto cleanup;
-
-    if ((nnodes = virXPathNodeSet("//volumes/volume", ctxt, &nodes)) < 0)
-        goto cleanup;
-
-    for (i = 0; i < nnodes; i++) {
-        ctxt->node = nodes[i];
-
-        if (!(src = virStoragePoolSourceListNewSource(list)))
-            goto cleanup;
-
-        if (!(src->dir = virXPathString("string(//name)", ctxt))) {
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("failed to extract gluster volume name"));
-            goto cleanup;
-        }
-
-        if (VIR_ALLOC_N(src->hosts, 1) < 0)
-            goto cleanup;
-        src->nhost = 1;
-
-        if (VIR_STRDUP(src->hosts[0].name, host) < 0)
-            goto cleanup;
-
-        src->format = pooltype;
-    }
-
-    ret = nnodes;
+    ret = virStorageUtilGlusterExtractPoolSources(host, outbuf, list, pooltype);
 
  cleanup:
-    VIR_FREE(nodes);
-    xmlXPathFreeContext(ctxt);
-    xmlFreeDoc(doc);
     VIR_FREE(outbuf);
     virCommandFree(cmd);
     VIR_FREE(glusterpath);
@@ -3002,10 +3050,12 @@ virStorageBackendBLKIDFindPart(blkid_probe probe,
 
     /* A blkid_known_pttype on "dvh" and "pc98" returns a failure;
      * however, the blkid_do_probe for "dvh" returns "sgi" and
-     * for "pc98" it returns "dos". So since those will cause problems
+     * for "pc98" it returns "dos". Although "bsd" is recognized,
+     * it seems that the parted created partition table is not being
+     * properly recogized. Since each of these will cause problems
      * with startup comparison, let's just treat them as UNKNOWN causing
      * the caller to fallback to using PARTED */
-    if (STREQ(format, "dvh") || STREQ(format, "pc98"))
+    if (STREQ(format, "dvh") || STREQ(format, "pc98") || STREQ(format, "bsd"))
         return VIR_STORAGE_BLKID_PROBE_UNKNOWN;
 
     /* Make sure we're doing a partitions probe from the start */
@@ -3213,8 +3263,8 @@ virStorageBackendPARTEDFindLabel(const char *device,
     /*  Does the on disk match what the pool desired? */
     if (STREQ(start, format))
         ret = VIR_STORAGE_PARTED_MATCH;
-
-    ret = VIR_STORAGE_PARTED_DIFFERENT;
+    else
+        ret = VIR_STORAGE_PARTED_DIFFERENT;
 
  cleanup:
     virCommandFree(cmd);
@@ -3436,6 +3486,9 @@ storageBackendProbeTarget(virStorageSourcePtr target,
         target->capacity = meta->capacity;
 
     if (encryption && meta->encryption) {
+        if (meta->encryption->payload_offset != -1)
+            target->capacity -= meta->encryption->payload_offset * 512;
+
         *encryption = meta->encryption;
         meta->encryption = NULL;
 
@@ -3460,6 +3513,58 @@ storageBackendProbeTarget(virStorageSourcePtr target,
     VIR_FORCE_CLOSE(fd);
     virStorageSourceFree(meta);
     return ret;
+}
+
+
+/**
+ * virStorageBackendRefreshVolTargetUpdate:
+ * @vol: Volume def that needs updating
+ *
+ * Attempt to probe the volume in order to get more details.
+ *
+ * Returns 0 on success, -2 to ignore failure, -1 on failure
+ */
+int
+virStorageBackendRefreshVolTargetUpdate(virStorageVolDefPtr vol)
+{
+    int err;
+
+    /* Real value is filled in during probe */
+    vol->target.format = VIR_STORAGE_FILE_RAW;
+
+    if ((err = storageBackendProbeTarget(&vol->target,
+                                         &vol->target.encryption)) < 0) {
+        if (err == -2) {
+            return -2;
+        } else if (err == -3) {
+            /* The backing file is currently unavailable, its format is not
+             * explicitly specified, the probe to auto detect the format
+             * failed: continue with faked RAW format, since AUTO will
+             * break virStorageVolTargetDefFormat() generating the line
+             * <format type='...'/>. */
+        } else {
+            return -1;
+        }
+    }
+
+    /* directory based volume */
+    if (vol->target.format == VIR_STORAGE_FILE_DIR)
+        vol->type = VIR_STORAGE_VOL_DIR;
+
+    if (vol->target.format == VIR_STORAGE_FILE_PLOOP)
+        vol->type = VIR_STORAGE_VOL_PLOOP;
+
+    if (vol->target.backingStore) {
+        ignore_value(storageBackendUpdateVolTargetInfo(VIR_STORAGE_VOL_FILE,
+                                                       vol->target.backingStore,
+                                                       false,
+                                                       VIR_STORAGE_VOL_OPEN_DEFAULT, 0));
+        /* If this failed, the backing file is currently unavailable,
+         * the capacity, allocation, owner, group and mode are unknown.
+         * An error message was raised, but we just continue. */
+    }
+
+    return 0;
 }
 
 
@@ -3499,49 +3604,23 @@ virStorageBackendRefreshLocal(virConnectPtr conn ATTRIBUTE_UNUSED,
             goto cleanup;
 
         vol->type = VIR_STORAGE_VOL_FILE;
-        vol->target.format = VIR_STORAGE_FILE_RAW; /* Real value is filled in during probe */
         if (virAsprintf(&vol->target.path, "%s/%s",
                         pool->def->target.path,
-                        vol->name) == -1)
+                        vol->name) < 0)
             goto cleanup;
 
         if (VIR_STRDUP(vol->key, vol->target.path) < 0)
             goto cleanup;
 
-        if ((err = storageBackendProbeTarget(&vol->target,
-                                             &vol->target.encryption)) < 0) {
+        if ((err = virStorageBackendRefreshVolTargetUpdate(vol)) < 0) {
             if (err == -2) {
                 /* Silently ignore non-regular files,
                  * eg 'lost+found', dangling symbolic link */
                 virStorageVolDefFree(vol);
                 vol = NULL;
                 continue;
-            } else if (err == -3) {
-                /* The backing file is currently unavailable, its format is not
-                 * explicitly specified, the probe to auto detect the format
-                 * failed: continue with faked RAW format, since AUTO will
-                 * break virStorageVolTargetDefFormat() generating the line
-                 * <format type='...'/>. */
-            } else {
-                goto cleanup;
             }
-        }
-
-        /* directory based volume */
-        if (vol->target.format == VIR_STORAGE_FILE_DIR)
-            vol->type = VIR_STORAGE_VOL_DIR;
-
-        if (vol->target.format == VIR_STORAGE_FILE_PLOOP)
-            vol->type = VIR_STORAGE_VOL_PLOOP;
-
-        if (vol->target.backingStore) {
-            ignore_value(storageBackendUpdateVolTargetInfo(VIR_STORAGE_VOL_FILE,
-                                                           vol->target.backingStore,
-                                                           false,
-                                                           VIR_STORAGE_VOL_OPEN_DEFAULT, 0));
-            /* If this failed, the backing file is currently unavailable,
-             * the capacity, allocation, owner, group and mode are unknown.
-             * An error message was raised, but we just continue. */
+            goto cleanup;
         }
 
         if (VIR_APPEND_ELEMENT(pool->volumes.objs, pool->volumes.count, vol) < 0)
@@ -4051,4 +4130,26 @@ virStorageBackendSCSIFindLUs(virStoragePoolObjPtr pool,
     VIR_DEBUG("Found %d LUs for pool %s", found, pool->def->name);
 
     return found;
+}
+
+
+/*
+ * @path: Path to the device to initialize
+ * @size: Size to be cleared
+ *
+ * Zero out possible partition table information for the specified
+ * bytes from the start of the @path and from the end of @path
+ *
+ * Returns 0 on success, -1 on failure with error message set
+ */
+int
+virStorageBackendZeroPartitionTable(const char *path,
+                                    unsigned long long size)
+{
+    if (storageBackendVolWipeLocalFile(path, VIR_STORAGE_VOL_WIPE_ALG_ZERO,
+                                       size, false) < 0)
+        return -1;
+
+    return storageBackendVolWipeLocalFile(path, VIR_STORAGE_VOL_WIPE_ALG_ZERO,
+                                          size, true);
 }

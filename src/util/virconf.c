@@ -238,7 +238,10 @@ virConfAddEntry(virConfPtr conf, char *name, virConfValuePtr value, char *comm)
     if ((comm == NULL) && (name == NULL))
         return NULL;
 
-    VIR_DEBUG("Add entry %s %p", name, value);
+    /* don't log fully commented out lines */
+    if (name)
+        VIR_DEBUG("Add entry %s %p", name, value);
+
     if (VIR_ALLOC(ret) < 0)
         return NULL;
 
@@ -287,14 +290,16 @@ virConfSaveValue(virBufferPtr buf, virConfValuePtr val)
             virBufferAsprintf(buf, "%llu", val->l);
             break;
         case VIR_CONF_STRING:
-            if (strchr(val->str, '\n') != NULL) {
-                virBufferAsprintf(buf, "\"\"\"%s\"\"\"", val->str);
-            } else if (strchr(val->str, '"') == NULL) {
-                virBufferAsprintf(buf, "\"%s\"", val->str);
-            } else if (strchr(val->str, '\'') == NULL) {
-                virBufferAsprintf(buf, "'%s'", val->str);
-            } else {
-                virBufferAsprintf(buf, "\"\"\"%s\"\"\"", val->str);
+            if (val->str) {
+                if (strchr(val->str, '\n') != NULL) {
+                    virBufferAsprintf(buf, "\"\"\"%s\"\"\"", val->str);
+                } else if (strchr(val->str, '"') == NULL) {
+                    virBufferAsprintf(buf, "\"%s\"", val->str);
+                } else if (strchr(val->str, '\'') == NULL) {
+                    virBufferAsprintf(buf, "'%s'", val->str);
+                } else {
+                    virBufferAsprintf(buf, "\"\"\"%s\"\"\"", val->str);
+                }
             }
             break;
         case VIR_CONF_LIST: {
@@ -802,27 +807,27 @@ virConfReadFile(const char *filename, unsigned int flags)
 }
 
 /**
- * virConfReadMem:
+ * virConfReadString:
  * @memory: pointer to the content of the configuration file
- * @len: length in byte
  * @flags: combination of virConfFlag(s)
  *
- * Reads a configuration file loaded in memory. The string can be
- * zero terminated in which case @len can be 0
+ * Reads a configuration file loaded in memory. The string must be
+ * zero terminated.
  *
  * Returns a handle to lookup settings or NULL if it failed to
  *         parse the content, use virConfFree() to free the data.
  */
 virConfPtr
-virConfReadMem(const char *memory, int len, unsigned int flags)
+virConfReadString(const char *memory, unsigned int flags)
 {
-    if ((memory == NULL) || (len < 0)) {
+    size_t len;
+
+    if (memory == NULL) {
         virConfError(NULL, VIR_ERR_INVALID_ARG, __FUNCTION__);
         return NULL;
     }
-    if (len == 0)
-        len = strlen(memory);
 
+    len = strlen(memory);
     return virConfParse("memory conf", memory, len, flags);
 }
 
@@ -1021,7 +1026,7 @@ int virConfGetValueStringList(virConfPtr conf,
             }
             break;
         }
-        /* fallthrough */
+        ATTRIBUTE_FALLTHROUGH;
 
     default:
         virReportError(VIR_ERR_INTERNAL_ERROR,

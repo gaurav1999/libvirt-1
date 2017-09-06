@@ -44,9 +44,10 @@ src/conf/storage_adapter_conf.c
 src/conf/storage_conf.c
 src/conf/virchrdev.c
 src/conf/virdomainobjlist.c
-src/conf/virinterfaceobj.c
+src/conf/virnetworkobj.c
 src/conf/virnodedeviceobj.c
 src/conf/virnwfilterobj.c
+src/conf/virsavecookie.c
 src/conf/virsecretobj.c
 src/conf/virstorageobj.c
 src/cpu/cpu.c
@@ -67,7 +68,6 @@ src/esx/esx_util.c
 src/esx/esx_vi.c
 src/esx/esx_vi_methods.c
 src/esx/esx_vi_types.c
-src/fdstream.c
 src/hyperv/hyperv_driver.c
 src/hyperv/hyperv_util.c
 src/hyperv/hyperv_wmi.c
@@ -118,7 +118,6 @@ src/network/leaseshelper.c
 src/node_device/node_device_driver.c
 src/node_device/node_device_hal.c
 src/node_device/node_device_udev.c
-src/nodeinfo.c
 src/nwfilter/nwfilter_dhcpsnoop.c
 src/nwfilter/nwfilter_driver.c
 src/nwfilter/nwfilter_ebiptables_driver.c
@@ -130,6 +129,7 @@ src/openvz/openvz_util.c
 src/phyp/phyp_driver.c
 src/qemu/qemu_agent.c
 src/qemu/qemu_alias.c
+src/qemu/qemu_block.c
 src/qemu/qemu_capabilities.c
 src/qemu/qemu_cgroup.c
 src/qemu/qemu_command.c
@@ -141,6 +141,7 @@ src/qemu/qemu_hostdev.c
 src/qemu/qemu_hotplug.c
 src/qemu/qemu_interface.c
 src/qemu/qemu_migration.c
+src/qemu/qemu_migration_cookie.c
 src/qemu/qemu_monitor.c
 src/qemu/qemu_monitor_json.c
 src/qemu/qemu_monitor_text.c
@@ -185,6 +186,7 @@ src/storage/storage_backend_sheepdog.c
 src/storage/storage_backend_vstorage.c
 src/storage/storage_backend_zfs.c
 src/storage/storage_driver.c
+src/storage/storage_source.c
 src/storage/storage_util.c
 src/test/test_driver.c
 src/uml/uml_conf.c
@@ -206,7 +208,10 @@ src/util/virdnsmasq.c
 src/util/virerror.c
 src/util/virerror.h
 src/util/vireventpoll.c
+src/util/virfcp.c
+src/util/virfdstream.c
 src/util/virfile.c
+src/util/virfilecache.c
 src/util/virfirewall.c
 src/util/virfirmware.c
 src/util/virhash.c
@@ -224,6 +229,7 @@ src/util/virlease.c
 src/util/virlockspace.c
 src/util/virlog.c
 src/util/virmacmap.c
+src/util/virmdev.c
 src/util/virnetdev.c
 src/util/virnetdevbandwidth.c
 src/util/virnetdevbridge.c
@@ -309,6 +315,7 @@ tools/virsh-nwfilter.c
 tools/virsh-pool.c
 tools/virsh-secret.c
 tools/virsh-snapshot.c
+tools/virsh-util.c
 tools/virsh-volume.c
 tools/virsh.c
 tools/virt-admin.c

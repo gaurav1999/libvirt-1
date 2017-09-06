@@ -26,42 +26,54 @@
 # define __VIR_NETWORK__DRIVER_H
 
 # include "internal.h"
-# include "network_conf.h"
 # include "domain_conf.h"
 # include "vircommand.h"
 # include "virdnsmasq.h"
+# include "virnetworkobj.h"
 
-int networkRegister(void);
+int
+networkRegister(void);
 
 # if WITH_NETWORK
-int networkAllocateActualDevice(virDomainDefPtr dom,
-                                virDomainNetDefPtr iface)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-int networkNotifyActualDevice(virDomainDefPtr dom,
-                              virDomainNetDefPtr iface)
-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
-int networkReleaseActualDevice(virDomainDefPtr dom,
-                               virDomainNetDefPtr iface)
+int
+networkAllocateActualDevice(virDomainDefPtr dom,
+                            virDomainNetDefPtr iface)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-int networkGetNetworkAddress(const char *netname, char **netaddr)
+void
+networkNotifyActualDevice(virDomainDefPtr dom,
+                          virDomainNetDefPtr iface)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-int networkGetActualType(virDomainNetDefPtr iface)
+int
+networkReleaseActualDevice(virDomainDefPtr dom,
+                           virDomainNetDefPtr iface)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
+int
+networkGetNetworkAddress(const char *netname,
+                         char **netaddr)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+
+int
+networkGetActualType(virDomainNetDefPtr iface)
     ATTRIBUTE_NONNULL(1);
 
-int networkDnsmasqConfContents(virNetworkObjPtr network,
-                        const char *pidfile,
-                        char **configstr,
-                        dnsmasqContext *dctx,
-                        dnsmasqCapsPtr caps);
+int
+networkDnsmasqConfContents(virNetworkObjPtr obj,
+                           const char *pidfile,
+                           char **configstr,
+                           dnsmasqContext *dctx,
+                           dnsmasqCapsPtr caps);
 
-bool networkBandwidthChangeAllowed(virDomainNetDefPtr iface,
-                                   virNetDevBandwidthPtr newBandwidth)
+bool
+networkBandwidthChangeAllowed(virDomainNetDefPtr iface,
+                              virNetDevBandwidthPtr newBandwidth)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
-int networkBandwidthUpdate(virDomainNetDefPtr iface,
-                           virNetDevBandwidthPtr newBandwidth)
+int
+networkBandwidthUpdate(virDomainNetDefPtr iface,
+                       virNetDevBandwidthPtr newBandwidth)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
 
 # else
@@ -72,16 +84,15 @@ int networkBandwidthUpdate(virDomainNetDefPtr iface,
 #  define networkDnsmasqConfContents(network, pidfile, configstr, \
                     dctx, caps) 0
 
-static inline int
+static inline void
 networkNotifyActualDevice(virDomainDefPtr dom ATTRIBUTE_UNUSED,
                           virDomainNetDefPtr iface ATTRIBUTE_UNUSED)
 {
-    return 0;
 }
 
 static inline int
 networkReleaseActualDevice(virDomainDefPtr dom ATTRIBUTE_UNUSED,
-                          virDomainNetDefPtr iface ATTRIBUTE_UNUSED)
+                           virDomainNetDefPtr iface ATTRIBUTE_UNUSED)
 {
     return 0;
 }
@@ -101,7 +112,5 @@ networkBandwidthUpdate(virDomainNetDefPtr iface ATTRIBUTE_UNUSED,
 }
 
 # endif
-
-typedef char *(*networkDnsmasqLeaseFileNameFunc)(const char *netname);
 
 #endif /* __VIR_NETWORK__DRIVER_H */

@@ -22,9 +22,10 @@
 
 #include "testutils.h"
 #include "internal.h"
+#include "virarch.h"
 #include "virthread.h"
 #include "qemu/qemu_capabilities.h"
-#define __QEMU_CAPSRIV_H_ALLOW__ 1
+#define __QEMU_CAPSPRIV_H_ALLOW__ 1
 #include "qemu/qemu_capspriv.h"
 
 #define VIR_FROM_THIS VIR_FROM_NONE
@@ -48,7 +49,7 @@ main(int argc, char **argv)
     virThread thread;
     virQEMUCapsPtr caps;
 
-    VIRT_TEST_PRELOAD(abs_builddir "/.libs/qemucapsprobemock.so");
+    VIR_TEST_PRELOAD(abs_builddir "/.libs/qemucapsprobemock.so");
 
     if (argc != 2) {
         fprintf(stderr, "%s QEMU_binary\n", argv[0]);
@@ -70,7 +71,7 @@ main(int argc, char **argv)
     if (virThreadCreate(&thread, false, eventLoop, NULL) < 0)
         return EXIT_FAILURE;
 
-    if (!(caps = virQEMUCapsNewForBinaryInternal(NULL, argv[1], "/tmp", NULL,
+    if (!(caps = virQEMUCapsNewForBinaryInternal(VIR_ARCH_NONE, argv[1], "/tmp",
                                                  -1, -1, true)))
         return EXIT_FAILURE;
 

@@ -58,7 +58,7 @@ int virBufferCheckErrorInternal(const virBuffer *buf,
                                 const char *filename,
                                 const char *funcname,
                                 size_t linenr)
-    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1);
+    ATTRIBUTE_NONNULL(1);
 /**
  * virBufferCheckError
  *
@@ -80,6 +80,8 @@ void virBufferVasprintf(virBufferPtr buf, const char *format, va_list ap)
   ATTRIBUTE_FMT_PRINTF(2, 0);
 void virBufferStrcat(virBufferPtr buf, ...)
   ATTRIBUTE_SENTINEL;
+void virBufferStrcatVArgs(virBufferPtr buf, va_list ap);
+
 void virBufferEscape(virBufferPtr buf, char escape, const char *toescape,
                      const char *format, const char *str);
 void virBufferEscapeN(virBufferPtr buf, const char *format,
@@ -88,6 +90,9 @@ void virBufferEscapeString(virBufferPtr buf, const char *format,
                            const char *str);
 void virBufferEscapeSexpr(virBufferPtr buf, const char *format,
                           const char *str);
+void virBufferEscapeRegex(virBufferPtr buf,
+                          const char *format,
+                          const char *str);
 void virBufferEscapeShell(virBufferPtr buf, const char *str);
 void virBufferURIEncodeString(virBufferPtr buf, const char *str);
 
@@ -95,6 +100,17 @@ void virBufferURIEncodeString(virBufferPtr buf, const char *str);
     virBufferAdd(buf_, "" literal_string_ "", sizeof(literal_string_) - 1)
 
 void virBufferAdjustIndent(virBufferPtr buf, int indent);
+void virBufferSetIndent(virBufferPtr, int indent);
+
+/**
+ * virBufferSetChildIndent
+ *
+ * Gets the parent indentation, increments it by 2 and sets it to
+ * child buffer.
+ */
+# define virBufferSetChildIndent(childBuf_, parentBuf_) \
+    virBufferAdjustIndent(childBuf_, virBufferGetIndent(parentBuf_, false) + 2)
+
 int virBufferGetIndent(const virBuffer *buf, bool dynamic);
 
 void virBufferTrim(virBufferPtr buf, const char *trim, int len);

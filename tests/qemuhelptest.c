@@ -8,6 +8,10 @@
 # include <stdlib.h>
 
 # include "qemu/qemu_capabilities.h"
+# define __QEMU_CAPSPRIV_H_ALLOW__
+# include "qemu/qemu_capspriv.h"
+# undef __QEMU_CAPSPRIV_H_ALLOW__
+
 # include "viralloc.h"
 # include "virstring.h"
 
@@ -40,7 +44,6 @@ static void printMismatchedFlags(virQEMUCapsPtr got,
 static int testHelpStrParsing(const void *data)
 {
     const struct testInfo *info = data;
-    char *path = NULL;
     char *help = NULL;
     unsigned int version, kvm_version;
     bool is_kvm;
@@ -49,10 +52,7 @@ static int testHelpStrParsing(const void *data)
     char *got = NULL;
     char *expected = NULL;
 
-    if (virAsprintf(&path, "%s/qemuhelpdata/%s", abs_srcdir, info->name) < 0)
-        return -1;
-
-    if (virTestLoadFile(path, &help) < 0)
+    if (!(help = virTestLoadFilePath("qemuhelpdata/", info->name, NULL)))
         goto cleanup;
 
     if (!(flags = virQEMUCapsNew()))
@@ -72,13 +72,8 @@ static int testHelpStrParsing(const void *data)
         virQEMUCapsSet(flags, QEMU_CAPS_MONITOR_JSON);
 # endif
 
-    VIR_FREE(path);
     VIR_FREE(help);
-    if (virAsprintf(&path, "%s/qemuhelpdata/%s-device", abs_srcdir,
-                    info->name) < 0)
-        goto cleanup;
-
-    if (virTestLoadFile(path, &help) < 0)
+    if (!(help = virTestLoadFilePath("qemuhelpdata/", info->name, "-device", NULL)))
         goto cleanup;
 
     if (virQEMUCapsParseDeviceStr(flags, help) < 0)
@@ -121,7 +116,6 @@ static int testHelpStrParsing(const void *data)
 
     ret = 0;
  cleanup:
-    VIR_FREE(path);
     VIR_FREE(help);
     virObjectUnref(flags);
     VIR_FREE(got);
@@ -155,7 +149,6 @@ mymain(void)
             QEMU_CAPS_DRIVE_SERIAL,
             QEMU_CAPS_ENABLE_KVM,
             QEMU_CAPS_SDL,
-            QEMU_CAPS_CHARDEV,
             QEMU_CAPS_RTC,
             QEMU_CAPS_NO_HPET,
             QEMU_CAPS_BOOT_MENU,
@@ -188,7 +181,6 @@ mymain(void)
             QEMU_CAPS_DRIVE_SERIAL,
             QEMU_CAPS_MEM_PATH,
             QEMU_CAPS_SDL,
-            QEMU_CAPS_CHARDEV,
             QEMU_CAPS_ENABLE_KVM,
             QEMU_CAPS_RTC,
             QEMU_CAPS_NO_HPET,
@@ -226,7 +218,6 @@ mymain(void)
             QEMU_CAPS_DRIVE_SERIAL,
             QEMU_CAPS_MEM_PATH,
             QEMU_CAPS_SDL,
-            QEMU_CAPS_CHARDEV,
             QEMU_CAPS_ENABLE_KVM,
             QEMU_CAPS_MONITOR_JSON,
             QEMU_CAPS_NETDEV,
@@ -273,7 +264,6 @@ mymain(void)
             QEMU_CAPS_DRIVE_SERIAL,
             QEMU_CAPS_MEM_PATH,
             QEMU_CAPS_SDL,
-            QEMU_CAPS_CHARDEV,
             QEMU_CAPS_ENABLE_KVM,
             QEMU_CAPS_MONITOR_JSON,
             QEMU_CAPS_NETDEV,
@@ -344,7 +334,6 @@ mymain(void)
             QEMU_CAPS_DRIVE_SERIAL,
             QEMU_CAPS_MEM_PATH,
             QEMU_CAPS_SDL,
-            QEMU_CAPS_CHARDEV,
             QEMU_CAPS_ENABLE_KVM,
             QEMU_CAPS_MONITOR_JSON,
             QEMU_CAPS_NETDEV,
@@ -431,7 +420,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)
 
 #else
 

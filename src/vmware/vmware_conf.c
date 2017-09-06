@@ -27,7 +27,6 @@
 #include "cpu/cpu.h"
 #include "dirname.h"
 #include "viralloc.h"
-#include "nodeinfo.h"
 #include "virfile.h"
 #include "viruuid.h"
 #include "virerror.h"
@@ -61,13 +60,15 @@ vmwareCapsInit(void)
 {
     virCapsPtr caps = NULL;
     virCapsGuestPtr guest = NULL;
-    virCPUDefPtr cpu = NULL;
 
     if ((caps = virCapabilitiesNew(virArchFromHost(),
                                    false, false)) == NULL)
         goto error;
 
-    if (nodeCapsInitNUMA(caps) < 0)
+    if (virCapabilitiesInitNUMA(caps) < 0)
+        goto error;
+
+    if (virCapabilitiesInitCaches(caps) < 0)
         goto error;
 
     /* i686 guests are always supported */
@@ -81,9 +82,9 @@ vmwareCapsInit(void)
                                       VIR_DOMAIN_VIRT_VMWARE,
                                       NULL, NULL, 0, NULL) == NULL)
         goto error;
+    guest = NULL;
 
-    if (!(cpu = virCPUGetHost(caps->host.arch, VIR_CPU_TYPE_HOST,
-                              NULL, NULL, 0)))
+    if (!(caps->host.cpu = virCPUProbeHost(caps->host.arch)))
         goto error;
 
     /* x86_64 guests are supported if
@@ -92,9 +93,9 @@ vmwareCapsInit(void)
      *  - Host CPU is x86_64 with virtualization extensions
      */
     if (caps->host.arch == VIR_ARCH_X86_64 ||
-        (virCPUCheckFeature(cpu->arch, cpu, "lm") &&
-         (virCPUCheckFeature(cpu->arch, cpu, "vmx") ||
-          virCPUCheckFeature(cpu->arch, cpu, "svm")))) {
+        (virCPUCheckFeature(caps->host.cpu->arch, caps->host.cpu, "lm") &&
+         (virCPUCheckFeature(caps->host.cpu->arch, caps->host.cpu, "vmx") ||
+          virCPUCheckFeature(caps->host.cpu->arch, caps->host.cpu, "svm")))) {
 
         if ((guest = virCapabilitiesAddGuest(caps,
                                              VIR_DOMAIN_OSTYPE_HVM,
@@ -106,15 +107,15 @@ vmwareCapsInit(void)
                                           VIR_DOMAIN_VIRT_VMWARE,
                                           NULL, NULL, 0, NULL) == NULL)
             goto error;
+        guest = NULL;
     }
 
- cleanup:
-    virCPUDefFree(cpu);
     return caps;
 
  error:
+    virCapabilitiesFreeGuest(guest);
     virObjectUnref(caps);
-    goto cleanup;
+    return NULL;
 }
 
 int

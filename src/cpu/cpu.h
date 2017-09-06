@@ -27,7 +27,7 @@
 # include "virerror.h"
 # include "datatypes.h"
 # include "virarch.h"
-# include "conf/cpu_conf.h"
+# include "cpu_conf.h"
 # include "cpu_x86_data.h"
 # include "cpu_ppc64_data.h"
 
@@ -54,8 +54,7 @@ typedef int
                      const virCPUData *data,
                      const char **models,
                      unsigned int nmodels,
-                     const char *preferred,
-                     unsigned int flags);
+                     const char *preferred);
 
 typedef int
 (*cpuArchEncode)    (virArch arch,
@@ -80,7 +79,7 @@ typedef virCPUDefPtr
                      unsigned int ncpus,
                      const char **models,
                      unsigned int nmodels,
-                     unsigned int flags);
+                     bool migratable);
 
 typedef int
 (*virCPUArchUpdate)(virCPUDefPtr guest,
@@ -116,6 +115,12 @@ typedef int
 typedef int
 (*virCPUArchConvertLegacy)(virCPUDefPtr cpu);
 
+typedef int
+(*virCPUArchExpandFeatures)(virCPUDefPtr cpu);
+
+typedef virCPUDefPtr
+(*virCPUArchCopyMigratable)(virCPUDefPtr cpu);
+
 struct cpuArchDriver {
     const char *name;
     const virArch *arch;
@@ -135,6 +140,8 @@ struct cpuArchDriver {
     virCPUArchGetModels getModels;
     virCPUArchTranslate translate;
     virCPUArchConvertLegacy convertLegacy;
+    virCPUArchExpandFeatures expandFeatures;
+    virCPUArchCopyMigratable copyMigratable;
 };
 
 
@@ -176,12 +183,18 @@ virCPUDataNew(virArch arch);
 void
 virCPUDataFree(virCPUDataPtr data);
 
+bool
+virCPUGetHostIsSupported(virArch arch);
+
 virCPUDefPtr
 virCPUGetHost(virArch arch,
               virCPUType type,
               virNodeInfoPtr nodeInfo,
               const char **models,
               unsigned int nmodels);
+
+virCPUDefPtr
+virCPUProbeHost(virArch arch);
 
 char *
 cpuBaselineXML(const char **xmlCPUs,
@@ -195,8 +208,7 @@ cpuBaseline (virCPUDefPtr *cpus,
              unsigned int ncpus,
              const char **models,
              unsigned int nmodels,
-             unsigned int flags)
-    ATTRIBUTE_NONNULL(1);
+             bool migratable);
 
 int
 virCPUUpdate(virArch arch,
@@ -244,6 +256,14 @@ int
 virCPUConvertLegacy(virArch arch,
                     virCPUDefPtr cpu)
     ATTRIBUTE_NONNULL(2);
+
+int
+virCPUExpandFeatures(virArch arch,
+                     virCPUDefPtr cpu);
+
+virCPUDefPtr
+virCPUCopyMigratable(virArch arch,
+                     virCPUDefPtr cpu);
 
 /* virCPUDataFormat and virCPUDataParse are implemented for unit tests only and
  * have no real-life usage

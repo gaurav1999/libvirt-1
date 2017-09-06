@@ -31,7 +31,6 @@
 #include "virlog.h"
 #include "virstring.h"
 #include "cpu/cpu.h"
-#include "nodeinfo.h"
 #include "domain_conf.h"
 #include "vircommand.h"
 #include "bhyve_capabilities.h"
@@ -41,21 +40,6 @@
 
 VIR_LOG_INIT("bhyve.bhyve_capabilities");
 
-static int
-virBhyveCapsInitCPU(virCapsPtr caps,
-                    virArch arch)
-{
-    virNodeInfo nodeinfo;
-
-    if (nodeGetInfo(&nodeinfo))
-        return -1;
-
-    if (!(caps->host.cpu = virCPUGetHost(arch, VIR_CPU_TYPE_HOST,
-                                         &nodeinfo, NULL, 0)))
-        return -1;
-
-    return 0;
-}
 
 virCapsPtr
 virBhyveCapsBuild(void)
@@ -77,8 +61,8 @@ virBhyveCapsBuild(void)
                                       NULL, NULL, 0, NULL) == NULL)
         goto error;
 
-    if (virBhyveCapsInitCPU(caps, virArchFromHost()) < 0)
-        VIR_WARN("Failed to get host CPU: %s", virGetLastErrorMessage());
+    if (!(caps->host.cpu = virCPUProbeHost(caps->host.arch)))
+        VIR_WARN("Failed to get host CPU");
 
     return caps;
 
@@ -86,6 +70,44 @@ virBhyveCapsBuild(void)
     virObjectUnref(caps);
     return NULL;
 }
+
+int
+virBhyveDomainCapsFill(virDomainCapsPtr caps,
+                       unsigned int bhyvecaps,
+                       virDomainCapsStringValuesPtr firmwares)
+{
+    caps->disk.supported = true;
+    VIR_DOMAIN_CAPS_ENUM_SET(caps->disk.diskDevice,
+                             VIR_DOMAIN_DISK_DEVICE_DISK,
+                             VIR_DOMAIN_DISK_DEVICE_CDROM);
+
+    VIR_DOMAIN_CAPS_ENUM_SET(caps->disk.bus,
+                             VIR_DOMAIN_DISK_BUS_SATA,
+                             VIR_DOMAIN_DISK_BUS_VIRTIO);
+
+    caps->os.supported = true;
+
+    if (bhyvecaps & BHYVE_CAP_LPC_BOOTROM) {
+        caps->os.loader.supported = true;
+        VIR_DOMAIN_CAPS_ENUM_SET(caps->os.loader.type,
+                                 VIR_DOMAIN_LOADER_TYPE_PFLASH);
+        VIR_DOMAIN_CAPS_ENUM_SET(caps->os.loader.readonly,
+                                 VIR_TRISTATE_BOOL_YES);
+
+        caps->os.loader.values.values = firmwares->values;
+        caps->os.loader.values.nvalues = firmwares->nvalues;
+    }
+
+
+    if (bhyvecaps & BHYVE_CAP_FBUF) {
+        caps->graphics.supported = true;
+        caps->video.supported = true;
+        VIR_DOMAIN_CAPS_ENUM_SET(caps->graphics.type, VIR_DOMAIN_GRAPHICS_TYPE_VNC);
+        VIR_DOMAIN_CAPS_ENUM_SET(caps->video.modelType, VIR_DOMAIN_VIDEO_TYPE_GOP);
+    }
+    return 0;
+}
+
 
 virDomainCapsPtr
 virBhyveDomainCapsBuild(bhyveConnPtr conn,
@@ -101,6 +123,7 @@ virBhyveDomainCapsBuild(bhyveConnPtr conn,
     size_t firmwares_alloc = 0;
     virBhyveDriverConfigPtr cfg = virBhyveDriverGetConfig(conn);
     const char *firmware_dir = cfg->firmwareDir;
+    virDomainCapsStringValuesPtr firmwares = NULL;
 
     if (!(caps = virDomainCapsNew(emulatorbin, machine, arch, virttype)))
         goto cleanup;
@@ -111,46 +134,31 @@ virBhyveDomainCapsBuild(bhyveConnPtr conn,
         goto cleanup;
     }
 
-    caps->os.supported = true;
-    caps->os.loader.supported = true;
-    VIR_DOMAIN_CAPS_ENUM_SET(caps->os.loader.type,
-                             VIR_DOMAIN_LOADER_TYPE_PFLASH);
-    VIR_DOMAIN_CAPS_ENUM_SET(caps->os.loader.readonly,
-                             VIR_TRISTATE_BOOL_YES);
+    if (VIR_ALLOC(firmwares) < 0)
+        goto cleanup;
 
     if (virDirOpenIfExists(&dir, firmware_dir) > 0) {
         while ((virDirRead(dir, &entry, firmware_dir)) > 0) {
-            if (VIR_RESIZE_N(caps->os.loader.values.values,
-                firmwares_alloc, caps->os.loader.values.nvalues, 2) < 0)
+            if (VIR_RESIZE_N(firmwares->values,
+                firmwares_alloc, firmwares->nvalues, 1) < 0)
                 goto cleanup;
 
             if (virAsprintf(
-                    &caps->os.loader.values.values[caps->os.loader.values.nvalues],
+                    &firmwares->values[firmwares->nvalues],
                     "%s/%s", firmware_dir, entry->d_name) < 0)
                 goto cleanup;
 
-           caps->os.loader.values.nvalues++;
+            firmwares->nvalues++;
         }
     } else {
         VIR_WARN("Cannot open firmware directory %s", firmware_dir);
     }
 
-    caps->disk.supported = true;
-    VIR_DOMAIN_CAPS_ENUM_SET(caps->disk.diskDevice,
-                             VIR_DOMAIN_DISK_DEVICE_DISK,
-                             VIR_DOMAIN_DISK_DEVICE_CDROM);
+    if (virBhyveDomainCapsFill(caps, bhyve_caps, firmwares) < 0)
+        goto cleanup;
 
-    VIR_DOMAIN_CAPS_ENUM_SET(caps->disk.bus,
-                             VIR_DOMAIN_DISK_BUS_SATA,
-                             VIR_DOMAIN_DISK_BUS_VIRTIO);
-
-    if (bhyve_caps & BHYVE_CAP_FBUF) {
-        caps->graphics.supported = true;
-        caps->video.supported = true;
-        VIR_DOMAIN_CAPS_ENUM_SET(caps->graphics.type, VIR_DOMAIN_GRAPHICS_TYPE_VNC);
-        VIR_DOMAIN_CAPS_ENUM_SET(caps->video.modelType, VIR_DOMAIN_VIDEO_TYPE_GOP);
-    }
  cleanup:
+    VIR_FREE(firmwares);
     VIR_DIR_CLOSE(dir);
     virObjectUnref(cfg);
     return caps;
@@ -193,6 +201,34 @@ virBhyveProbeGrubCaps(virBhyveGrubCapsFlags *caps)
 }
 
 static int
+bhyveProbeCapsDeviceHelper(unsigned int *caps,
+                           char *binary,
+                           const char *bus,
+                           const char *device,
+                           const char *errormsg,
+                           unsigned int flag)
+{
+    char *error;
+    virCommandPtr cmd = NULL;
+    int ret = -1, exit;
+
+    cmd = virCommandNew(binary);
+    virCommandAddArgList(cmd, bus, device, NULL);
+    virCommandSetErrorBuffer(cmd, &error);
+    if (virCommandRun(cmd, &exit) < 0)
+        goto cleanup;
+
+    if (strstr(error, errormsg) == NULL)
+        *caps |= flag;
+
+    ret = 0;
+ cleanup:
+    VIR_FREE(error);
+    virCommandFree(cmd);
+    return ret;
+}
+
+static int
 bhyveProbeCapsRTC_UTC(unsigned int *caps, char *binary)
 {
     char *help;
@@ -219,96 +255,56 @@ bhyveProbeCapsRTC_UTC(unsigned int *caps, char *binary)
 static int
 bhyveProbeCapsAHCI32Slot(unsigned int *caps, char *binary)
 {
-    char *error;
-    virCommandPtr cmd = NULL;
-    int ret = 0, exit;
-
-    cmd = virCommandNew(binary);
-    virCommandAddArgList(cmd, "-s", "0,ahci", NULL);
-    virCommandSetErrorBuffer(cmd, &error);
-    if (virCommandRun(cmd, &exit) < 0) {
-        ret = -1;
-        goto out;
-    }
-
-    if (strstr(error, "pci slot 0:0: unknown device \"ahci\"") == NULL)
-        *caps |= BHYVE_CAP_AHCI32SLOT;
-
- out:
-    VIR_FREE(error);
-    virCommandFree(cmd);
-    return ret;
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-s",
+                                      "0,ahci",
+                                      "pci slot 0:0: unknown device \"ahci\"",
+                                      BHYVE_CAP_AHCI32SLOT);
 }
+
 
 static int
 bhyveProbeCapsNetE1000(unsigned int *caps, char *binary)
 {
-    char *error;
-    virCommandPtr cmd = NULL;
-    int ret = -1, exit;
-
-    cmd = virCommandNew(binary);
-    virCommandAddArgList(cmd, "-s", "0,e1000", NULL);
-    virCommandSetErrorBuffer(cmd, &error);
-    if (virCommandRun(cmd, &exit) < 0)
-        goto cleanup;
-
-    if (strstr(error, "pci slot 0:0: unknown device \"e1000\"") == NULL)
-        *caps |= BHYVE_CAP_NET_E1000;
-
-    ret = 0;
- cleanup:
-    VIR_FREE(error);
-    virCommandFree(cmd);
-    return ret;
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-s",
+                                      "0,e1000",
+                                      "pci slot 0:0: unknown device \"e1000\"",
+                                      BHYVE_CAP_NET_E1000);
 }
 
 static int
 bhyveProbeCapsLPC_Bootrom(unsigned int *caps, char *binary)
 {
-    char *error;
-    virCommandPtr cmd = NULL;
-    int ret = -1, exit;
-
-    cmd = virCommandNew(binary);
-    virCommandAddArgList(cmd, "-l", "bootrom", NULL);
-    virCommandSetErrorBuffer(cmd, &error);
-    if (virCommandRun(cmd, &exit) < 0)
-        goto cleanup;
-
-    if (strstr(error, "bhyve: invalid lpc device configuration 'bootrom'") == NULL)
-        *caps |= BHYVE_CAP_LPC_BOOTROM;
-
-    ret = 0;
- cleanup:
-    VIR_FREE(error);
-    virCommandFree(cmd);
-    return ret;
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-l",
+                                      "bootrom",
+                                      "bhyve: invalid lpc device configuration 'bootrom'",
+                                      BHYVE_CAP_LPC_BOOTROM);
 }
 
 
 static int
 bhyveProbeCapsFramebuffer(unsigned int *caps, char *binary)
 {
-    char *error;
-    virCommandPtr cmd = NULL;
-    int ret = -1, exit;
-
-    cmd = virCommandNew(binary);
-    virCommandAddArgList(cmd, "-s", "0,fbuf", NULL);
-    virCommandSetErrorBuffer(cmd, &error);
-    if (virCommandRun(cmd, &exit) < 0)
-        goto cleanup;
-
-    if (strstr(error, "pci slot 0:0: unknown device \"fbuf\"") == NULL)
-        *caps |= BHYVE_CAP_FBUF;
-
-    ret = 0;
- cleanup:
-    VIR_FREE(error);
-    virCommandFree(cmd);
-    return ret;
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-s",
+                                      "0,fbuf",
+                                      "pci slot 0:0: unknown device \"fbuf\"",
+                                      BHYVE_CAP_FBUF);
 }
+
+
+static int
+bhyveProbeCapsXHCIController(unsigned int *caps, char *binary)
+{
+    return bhyveProbeCapsDeviceHelper(caps, binary,
+                                      "-s",
+                                      "0,xhci",
+                                      "pci slot 0:0: unknown device \"xhci\"",
+                                      BHYVE_CAP_FBUF);
+}
+
 
 int
 virBhyveProbeCaps(unsigned int *caps)
@@ -335,6 +331,9 @@ virBhyveProbeCaps(unsigned int *caps)
         goto out;
 
     if ((ret = bhyveProbeCapsFramebuffer(caps, binary)))
+        goto out;
+
+    if ((ret = bhyveProbeCapsXHCIController(caps, binary)))
         goto out;
 
  out:

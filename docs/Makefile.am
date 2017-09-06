@@ -52,7 +52,22 @@ devhelphtml =			\
 css =         \
   generic.css \
   libvirt.css \
+  mobile.css \
   main.css
+
+fonts = \
+  fonts/LICENSE.md \
+  fonts/stylesheet.css \
+  fonts/overpass-bold-italic.woff \
+  fonts/overpass-bold.woff \
+  fonts/overpass-italic.woff \
+  fonts/overpass-light-italic.woff \
+  fonts/overpass-light.woff \
+  fonts/overpass-mono-bold.woff \
+  fonts/overpass-mono-light.woff \
+  fonts/overpass-mono-regular.woff \
+  fonts/overpass-mono-semibold.woff \
+  fonts/overpass-regular.woff
 
 devhelppng =		\
   devhelp/home.png	\
@@ -158,12 +173,12 @@ schema_DATA = $(wildcard $(srcdir)/schemas/*.rng)
 EXTRA_DIST=					\
   apibuild.py genaclperms.pl \
   site.xsl subsite.xsl newapi.xsl page.xsl \
-  hacking1.xsl hacking2.xsl wrapstring.xsl \
+  wrapstring.xsl \
   $(dot_html) $(dot_html_in) $(gif) $(apihtml) $(apipng) \
   $(devhelphtml) $(devhelppng) $(devhelpcss) $(devhelpxsl) \
   $(xml) $(qemu_xml) $(lxc_xml) $(admin_xml) $(fig) $(png) $(css) \
   $(logofiles) $(patches) $(dot_php_in) $(dot_php_code_in) $(dot_php)\
-  $(internals_html_in) $(internals_html) \
+  $(internals_html_in) $(internals_html) $(fonts) \
   aclperms.htmlinc \
   hvsupport.pl \
   $(schema_DATA)
@@ -181,6 +196,13 @@ MAINTAINERCLEANFILES = \
   $(addprefix $(srcdir)/,$(internals_html)) \
   $(addprefix $(srcdir)/,$(dot_php)) \
   $(srcdir)/hvsupport.html.in $(srcdir)/aclperms.htmlinc
+
+timestamp="$(shell if test -n "$$SOURCE_DATE_EPOCH"; \
+		   then \
+		     date -u --date="@$$SOURCE_DATE_EPOCH"; \
+		   else \
+		     date -u; \
+		   fi)"
 
 all-am: web
 
@@ -207,19 +229,17 @@ $(srcdir)/hvsupport.html.in: $(srcdir)/hvsupport.pl $(api_DATA) \
 news.html.in: \
 	  $(srcdir)/news.xml \
 	  $(srcdir)/news-html.xsl
-	$(AM_V_GEN) \
-	if [ -x $(XSLTPROC) ]; then \
-	  $(XSLTPROC) --nonet \
+	$(AM_V_GEN)$(XSLTPROC) --nonet \
 	    $(srcdir)/news-html.xsl \
 	    $(srcdir)/news.xml \
 	  >$@-tmp \
 	    || { rm -f $@-tmp; exit 1; }; \
 	  sed 's/ xmlns=""//g' $@-tmp >$@ \
 	    || { rm -f $@-tmp; exit 1; }; \
-	  rm -f $@-tmp; \
-	fi
+	  rm -f $@-tmp
 EXTRA_DIST += \
 	$(srcdir)/news.xml \
+	$(srcdir)/news.rng \
 	$(srcdir)/news-html.xsl
 MAINTAINERCLEANFILES += \
 	$(srcdir)/news.html.in
@@ -229,9 +249,7 @@ MAINTAINERCLEANFILES += \
 
 %.html.tmp: %.html.in site.xsl subsite.xsl page.xsl \
 		$(acl_generated)
-	@if [ -x $(XSLTPROC) ] ; then \
-	  echo "Generating $@"; \
-	  name=`echo $@ | sed -e 's/.tmp//'`; \
+	$(AM_V_GEN)name=`echo $@ | sed -e 's/.tmp//'`; \
 	  dir=`dirname $@` ; \
 	  if test "$$dir" = "."; \
 	  then \
@@ -240,52 +258,40 @@ MAINTAINERCLEANFILES += \
 	    $(MKDIR_P) $$dir; \
 	    style=subsite.xsl; \
 	  fi; \
-	  $(XSLTPROC) --stringparam pagename $$name --nonet \
+	  $(XSLTPROC) --stringparam pagename $$name \
+	    --stringparam timestamp $(timestamp) --nonet \
 	    $(top_srcdir)/docs/$$style $< > $@ \
-	    || { rm $@ && exit 1; }; fi
+	    || { rm $@ && exit 1; }
 
 %.html: %.html.tmp
-	@if test -x $(XMLLINT) && test -x $(XMLCATALOG) ; then \
-	  if $(XMLCATALOG) '$(XML_CATALOG_FILE)' \
-	    "-//W3C//DTD XHTML 1.0 Strict//EN" > /dev/null ; then \
-	  echo "Validating $@" ; \
-	  SGML_CATALOG_FILES='$(XML_CATALOG_FILE)' \
-	  $(XMLLINT) --catalogs --nonet --format --valid $< > $(srcdir)/$@ \
-	  || { rm $(srcdir)/$@ && exit 1; }; \
-	  else echo "missing XHTML1 DTD"; cat $< > $(srcdir)/$@ ; fi ; fi
+	$(AM_V_GEN)$(XMLLINT) --nonet --format $< > $(srcdir)/$@ \
+	  || { rm $(srcdir)/$@ && exit 1; }
 
 %.php.tmp: %.php.in site.xsl page.xsl
-	@if [ -x $(XSLTPROC) ] ; then \
-	  echo "Generating $@"; \
-	  $(XSLTPROC) --stringparam pagename $(@:.tmp=) --nonet \
+	$(AM_V_GEN)$(XSLTPROC) --stringparam pagename $(@:.tmp=) \
+	    --stringparam timestamp $(timestamp) --nonet \
 	    $(top_srcdir)/docs/site.xsl $< > $@ \
-	    || { rm $@ && exit 1; }; fi
+	    || { rm $@ && exit 1; }
 
 %.php: %.php.tmp %.php.code.in
-	@if [ -x $(XSLTPROC) ] ; then \
-	  echo "Scripting $@"; \
-	    sed -e '/<span id="php_placeholder"><\/span>/r '"$(srcdir)/$@.code.in" \
+	$(AM_V_GEN)sed \
+	    -e '/<span id="php_placeholder"><\/span>/r '"$(srcdir)/$@.code.in" \
 	    -e /php_placeholder/d < $@.tmp > $(srcdir)/$@ \
-	    || { rm $(srcdir)/$@ && exit 1; }; fi
+	    || { rm $(srcdir)/$@ && exit 1; }
 
 $(apihtml_generated): html/index.html
 
 html/index.html: libvirt-api.xml newapi.xsl page.xsl $(APIBUILD_STAMP)
-	$(AM_V_GEN)if [ -x $(XSLTPROC) ] ; then \
-	  $(XSLTPROC) --nonet -o $(srcdir)/ \
+	$(AM_V_GEN)$(XSLTPROC) --nonet -o $(srcdir)/ \
 	  --stringparam builddir '$(abs_top_builddir)' \
-	  $(srcdir)/newapi.xsl $(srcdir)/libvirt-api.xml ; fi && \
-	if test -x $(XMLLINT) && test -x $(XMLCATALOG) ; then \
-	  if $(XMLCATALOG) '$(XML_CATALOG_FILE)' "-//W3C//DTD XHTML 1.0 Strict//EN" \
-	    > /dev/null ; then \
-	  SGML_CATALOG_FILES='$(XML_CATALOG_FILE)' \
-	  $(XMLLINT) --catalogs --nonet --valid --noout $(srcdir)/html/*.html ; \
-	  else echo "missing XHTML1 DTD"; cat $< > $(srcdir)/$@ ; fi ; fi
+	  --stringparam timestamp $(timestamp) \
+	  $(srcdir)/newapi.xsl $(srcdir)/libvirt-api.xml && \
+	  $(XMLLINT) --nonet --noout $(srcdir)/html/*.html
 
 $(addprefix $(srcdir)/,$(devhelphtml)): $(srcdir)/libvirt-api.xml $(devhelpxsl)
-	$(AM_V_GEN)if [ -x $(XSLTPROC) ] ; then \
-	  $(XSLTPROC) --nonet -o $(srcdir)/devhelp/ \
-	  $(top_srcdir)/docs/devhelp/devhelp.xsl $(srcdir)/libvirt-api.xml ; fi
+	$(AM_V_GEN)$(XSLTPROC) --stringparam timestamp $(timestamp) \
+	  --nonet -o $(srcdir)/devhelp/ \
+	  $(top_srcdir)/docs/devhelp/devhelp.xsl $(srcdir)/libvirt-api.xml
 
 
 python_generated_files = \
@@ -382,9 +388,13 @@ install-data-local:
 	for file in $(devhelphtml) $(devhelppng) $(devhelpcss); do \
 	    $(INSTALL) -m 0644 $(srcdir)/$${file} $(DESTDIR)$(DEVHELP_DIR) ; \
 	done
+	$(mkinstalldirs) $(DESTDIR)$(HTML_DIR)/fonts
+	for f in $(fonts); do \
+	  $(INSTALL) -m 0644 $(srcdir)/$$f $(DESTDIR)$(HTML_DIR)/fonts; \
+	done
 
 uninstall-local:
-	for f in $(css) $(dot_html) $(gif) $(png); do \
+	for f in $(css) $(dot_html) $(gif) $(png) $(fonts); do \
 	  rm -f $(DESTDIR)$(HTML_DIR)/$$f; \
 	done
 	for f in $(logofiles); do \

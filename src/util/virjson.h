@@ -81,6 +81,7 @@ struct _virJSONValue {
 };
 
 void virJSONValueFree(virJSONValuePtr value);
+void virJSONValueHashFree(void *opaque, const void *name);
 
 int virJSONValueObjectCreate(virJSONValuePtr *obj, ...)
     ATTRIBUTE_NONNULL(1) ATTRIBUTE_SENTINEL;
@@ -112,6 +113,8 @@ int virJSONValueObjectHasKey(virJSONValuePtr object, const char *key);
 virJSONValuePtr virJSONValueObjectGet(virJSONValuePtr object, const char *key);
 virJSONValuePtr virJSONValueObjectGetByType(virJSONValuePtr object,
                                             const char *key, virJSONType type);
+
+bool virJSONValueIsObject(virJSONValuePtr object);
 
 bool virJSONValueIsArray(virJSONValuePtr array);
 ssize_t virJSONValueArraySize(const virJSONValue *array);
@@ -182,5 +185,7 @@ int virJSONValueObjectForeachKeyValue(virJSONValuePtr object,
 virJSONValuePtr virJSONValueCopy(const virJSONValue *in);
 
 char *virJSONStringReformat(const char *jsonstr, bool pretty);
+
+virJSONValuePtr virJSONValueObjectDeflatten(virJSONValuePtr json);
 
 #endif /* __VIR_JSON_H_ */

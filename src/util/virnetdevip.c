@@ -44,7 +44,7 @@
 #ifdef __linux__
 # include <linux/sockios.h>
 # include <linux/if_vlan.h>
-# define VIR_NETDEV_FAMILY AF_PACKET
+# define VIR_NETDEV_FAMILY AF_UNIX
 #elif defined(HAVE_STRUCT_IFREQ) && defined(AF_LOCAL)
 # define VIR_NETDEV_FAMILY AF_LOCAL
 #else
@@ -551,20 +551,31 @@ virNetDevIPCheckIPv6ForwardingCallback(const struct nlmsghdr *resp,
     int ret = 0;
     int len = RTM_PAYLOAD(resp);
     int oif = -1;
+    size_t i;
+    bool hasDevice;
 
     /* Ignore messages other than route ones */
     if (resp->nlmsg_type != RTM_NEWROUTE)
         return ret;
 
-    /* Extract a few attributes */
+    /* Extract a device ID attribute */
+    VIR_WARNINGS_NO_CAST_ALIGN
     for (rta = RTM_RTA(rtmsg); RTA_OK(rta, len); rta = RTA_NEXT(rta, len)) {
-        switch (rta->rta_type) {
-        case RTA_OIF:
+        VIR_WARNINGS_RESET
+        if (rta->rta_type == RTA_OIF) {
             oif = *(int *)RTA_DATA(rta);
+
+            /* Should never happen: netlink message would be broken */
+            if (ifname) {
+                char *ifname2 = virNetDevGetName(oif);
+                VIR_WARN("Single route has unexpected 2nd interface "
+                         "- '%s' and '%s'", ifname, ifname2);
+                VIR_FREE(ifname2);
+                break;
+            }
 
             if (!(ifname = virNetDevGetName(oif)))
                 goto error;
-            break;
         }
     }
 
@@ -578,7 +589,13 @@ virNetDevIPCheckIPv6ForwardingCallback(const struct nlmsghdr *resp,
     accept_ra = virNetDevIPGetAcceptRA(ifname);
     VIR_DEBUG("Checking route for device %s, accept_ra: %d", ifname, accept_ra);
 
-    if (accept_ra != 2 && VIR_APPEND_ELEMENT(data->devices, data->ndevices, ifname) < 0)
+    hasDevice = false;
+    for (i = 0; i < data->ndevices && !hasDevice; i++) {
+        if (STREQ(data->devices[i], ifname))
+            hasDevice = true;
+    }
+    if (accept_ra != 2 && !hasDevice &&
+        VIR_APPEND_ELEMENT(data->devices, data->ndevices, ifname) < 0)
         goto error;
 
  cleanup:
@@ -893,10 +910,15 @@ virNetDevGetifaddrsAddress(const char *ifname,
     }
 
     for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
-        int family = ifa->ifa_addr->sa_family;
+        int family;
 
         if (STRNEQ_NULLABLE(ifa->ifa_name, ifname))
             continue;
+
+        if (!ifa->ifa_addr)
+            continue;
+        family = ifa->ifa_addr->sa_family;
+
         if (family != AF_INET6 && family != AF_INET)
             continue;
 

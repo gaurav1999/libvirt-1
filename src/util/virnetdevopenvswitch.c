@@ -64,6 +64,69 @@ virNetDevOpenvswitchAddTimeout(virCommandPtr cmd)
 }
 
 /**
+ * virNetDevOpenvswitchConstructVlans:
+ * @cmd: command to construct
+ * @virtVlan: VLAN configuration to be applied
+ *
+ * Construct the VLAN configuration parameters to be passed to
+ * ovs-vsctl command.
+ *
+ * Returns 0 in case of success or -1 in case of failure.
+ */
+static int
+virNetDevOpenvswitchConstructVlans(virCommandPtr cmd, virNetDevVlanPtr virtVlan)
+{
+    int ret = -1;
+    size_t i = 0;
+    virBuffer buf = VIR_BUFFER_INITIALIZER;
+
+    if (!virtVlan || !virtVlan->nTags)
+        return 0;
+
+    switch (virtVlan->nativeMode) {
+    case VIR_NATIVE_VLAN_MODE_TAGGED:
+        virCommandAddArg(cmd, "vlan_mode=native-tagged");
+        virCommandAddArgFormat(cmd, "tag=%d", virtVlan->nativeTag);
+        break;
+    case VIR_NATIVE_VLAN_MODE_UNTAGGED:
+        virCommandAddArg(cmd, "vlan_mode=native-untagged");
+        virCommandAddArgFormat(cmd, "tag=%d", virtVlan->nativeTag);
+        break;
+    case VIR_NATIVE_VLAN_MODE_DEFAULT:
+    default:
+        break;
+    }
+
+    if (virtVlan->trunk) {
+        virBufferAddLit(&buf, "trunk=");
+
+        /*
+         * Trunk ports have at least one VLAN. Do the first one
+         * outside the "for" loop so we can put a "," at the
+         * start of the for loop if there are more than one VLANs
+         * on this trunk port.
+         */
+        virBufferAsprintf(&buf, "%d", virtVlan->tag[i]);
+
+        for (i = 1; i < virtVlan->nTags; i++) {
+            virBufferAddLit(&buf, ",");
+            virBufferAsprintf(&buf, "%d", virtVlan->tag[i]);
+        }
+
+        if (virBufferCheckError(&buf) < 0)
+            goto cleanup;
+        virCommandAddArg(cmd, virBufferCurrentContent(&buf));
+    } else if (virtVlan->nTags) {
+        virCommandAddArgFormat(cmd, "tag=%d", virtVlan->tag[0]);
+    }
+
+    ret = 0;
+ cleanup:
+    virBufferFreeAndReset(&buf);
+    return ret;
+}
+
+/**
  * virNetDevOpenvswitchAddPort:
  * @brname: the bridge name
  * @ifname: the network interface name
@@ -82,7 +145,6 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
                                    virNetDevVlanPtr virtVlan)
 {
     int ret = -1;
-    size_t i = 0;
     virCommandPtr cmd = NULL;
     char macaddrstr[VIR_MAC_STRING_BUFLEN];
     char ifuuidstr[VIR_UUID_STRING_BUFLEN];
@@ -91,7 +153,6 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
     char *ifaceid_ex_id = NULL;
     char *profile_ex_id = NULL;
     char *vmid_ex_id = NULL;
-    virBuffer buf = VIR_BUFFER_INITIALIZER;
 
     virMacAddrFormat(macaddr, macaddrstr);
     virUUIDFormat(ovsport->interfaceID, ifuuidstr);
@@ -117,45 +178,8 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
     virCommandAddArgList(cmd, "--", "--if-exists", "del-port",
                          ifname, "--", "add-port", brname, ifname, NULL);
 
-    if (virtVlan && virtVlan->nTags > 0) {
-
-        switch (virtVlan->nativeMode) {
-        case VIR_NATIVE_VLAN_MODE_TAGGED:
-            virCommandAddArg(cmd, "vlan_mode=native-tagged");
-            virCommandAddArgFormat(cmd, "tag=%d", virtVlan->nativeTag);
-            break;
-        case VIR_NATIVE_VLAN_MODE_UNTAGGED:
-            virCommandAddArg(cmd, "vlan_mode=native-untagged");
-            virCommandAddArgFormat(cmd, "tag=%d", virtVlan->nativeTag);
-            break;
-        case VIR_NATIVE_VLAN_MODE_DEFAULT:
-        default:
-            break;
-        }
-
-        if (virtVlan->trunk) {
-            virBufferAddLit(&buf, "trunk=");
-
-            /*
-             * Trunk ports have at least one VLAN. Do the first one
-             * outside the "for" loop so we can put a "," at the
-             * start of the for loop if there are more than one VLANs
-             * on this trunk port.
-             */
-            virBufferAsprintf(&buf, "%d", virtVlan->tag[i]);
-
-            for (i = 1; i < virtVlan->nTags; i++) {
-                virBufferAddLit(&buf, ",");
-                virBufferAsprintf(&buf, "%d", virtVlan->tag[i]);
-            }
-
-            if (virBufferCheckError(&buf) < 0)
-                goto cleanup;
-            virCommandAddArg(cmd, virBufferCurrentContent(&buf));
-        } else if (virtVlan->nTags) {
-            virCommandAddArgFormat(cmd, "tag=%d", virtVlan->tag[0]);
-        }
-    }
+    if (virNetDevOpenvswitchConstructVlans(cmd, virtVlan) < 0)
+        goto cleanup;
 
     if (ovsport->profileID[0] == '\0') {
         virCommandAddArgList(cmd,
@@ -185,7 +209,6 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
 
     ret = 0;
  cleanup:
-    virBufferFreeAndReset(&buf);
     VIR_FREE(attachedmac_ex_id);
     VIR_FREE(ifaceid_ex_id);
     VIR_FREE(vmid_ex_id);
@@ -317,14 +340,8 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
 {
     virCommandPtr cmd = NULL;
     char *output;
-    long long rx_bytes;
-    long long rx_packets;
-    long long tx_bytes;
-    long long tx_packets;
-    long long rx_errs;
-    long long rx_drop;
-    long long tx_errs;
-    long long tx_drop;
+    char *tmp;
+    bool gotStats = false;
     int ret = -1;
 
     /* Just ensure the interface exists in ovs */
@@ -340,67 +357,45 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
         goto cleanup;
     }
 
-    VIR_FREE(output);
-    virCommandFree(cmd);
-
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
-    virCommandAddArgList(cmd, "get", "Interface", ifname,
-                         "statistics:rx_bytes",
-                         "statistics:rx_packets",
-                         "statistics:tx_bytes",
-                         "statistics:tx_packets", NULL);
-    virCommandSetOutputBuffer(cmd, &output);
-
-    if (virCommandRun(cmd, NULL) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Interface doesn't have statistics"));
-        goto cleanup;
-    }
+#define GET_STAT(name, member)                                              \
+    do {                                                                    \
+        VIR_FREE(output);                                                   \
+        virCommandFree(cmd);                                                \
+        cmd = virCommandNew(OVSVSCTL);                                      \
+        virNetDevOpenvswitchAddTimeout(cmd);                                \
+        virCommandAddArgList(cmd, "get", "Interface", ifname,               \
+                             "statistics:" name, NULL);                     \
+        virCommandSetOutputBuffer(cmd, &output);                            \
+        if (virCommandRun(cmd, NULL) < 0) {                                 \
+            stats->member = -1;                                             \
+        } else {                                                            \
+            if (virStrToLong_ll(output, &tmp, 10, &stats->member) < 0 ||    \
+                *tmp != '\n') {                                             \
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",                \
+                               _("Fail to parse ovs-vsctl output"));        \
+                goto cleanup;                                               \
+            }                                                               \
+            gotStats = true;                                                \
+        }                                                                   \
+    } while (0)
 
     /* The TX/RX fields appear to be swapped here
      * because this is the host view. */
-    if (sscanf(output, "%lld\n%lld\n%lld\n%lld\n",
-               &tx_bytes, &tx_packets, &rx_bytes, &rx_packets) != 4) {
+    GET_STAT("rx_bytes", tx_bytes);
+    GET_STAT("rx_packets", tx_packets);
+    GET_STAT("rx_errors", tx_errs);
+    GET_STAT("rx_dropped", tx_drop);
+    GET_STAT("tx_bytes", rx_bytes);
+    GET_STAT("tx_packets", rx_packets);
+    GET_STAT("tx_errors", rx_errs);
+    GET_STAT("tx_dropped", rx_drop);
+
+    if (!gotStats) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Fail to parse ovs-vsctl output"));
+                       _("Interface doesn't have any statistics"));
         goto cleanup;
     }
 
-    stats->rx_bytes = rx_bytes;
-    stats->rx_packets = rx_packets;
-    stats->tx_bytes = tx_bytes;
-    stats->tx_packets = tx_packets;
-
-    VIR_FREE(output);
-    virCommandFree(cmd);
-
-    cmd = virCommandNew(OVSVSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
-    virCommandAddArgList(cmd, "get", "Interface", ifname,
-                         "statistics:rx_errors",
-                         "statistics:rx_dropped",
-                         "statistics:tx_errors",
-                         "statistics:tx_dropped", NULL);
-    virCommandSetOutputBuffer(cmd, &output);
-    if (virCommandRun(cmd, NULL) < 0) {
-        /* This interface don't have errors or dropped, so set them to 0 */
-        stats->rx_errs = 0;
-        stats->rx_drop = 0;
-        stats->tx_errs = 0;
-        stats->tx_drop = 0;
-    } else if (sscanf(output, "%lld\n%lld\n%lld\n%lld\n",
-                      &tx_errs, &tx_drop, &rx_errs, &rx_drop) == 4) {
-        stats->rx_errs = rx_errs;
-        stats->rx_drop = rx_drop;
-        stats->tx_errs = tx_errs;
-        stats->tx_drop = tx_drop;
-        ret = 0;
-    } else {
-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                       _("Fail to parse ovs-vsctl output"));
-        goto cleanup;
-    }
     ret = 0;
 
  cleanup:
@@ -444,6 +439,7 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
         goto cleanup;
     }
 
+    tmpIfname++;
     cmd = virCommandNew(OVSVSCTL);
     virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "get", "Interface", tmpIfname, "name", NULL);
@@ -462,5 +458,43 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
     virStringListFreeCount(tokens, ntokens);
     virCommandFree(cmd);
     VIR_FREE(ovs_timeout);
+    return ret;
+}
+
+/**
+ * virNetDevOpenvswitchUpdateVlan:
+ * @ifname: the network interface name
+ * @virtVlan: VLAN configuration to be applied
+ *
+ * Update VLAN configuration of an OVS port.
+ *
+ * Returns 0 in case of success or -1 in case of failure.
+ */
+int virNetDevOpenvswitchUpdateVlan(const char *ifname,
+                                   virNetDevVlanPtr virtVlan)
+{
+    int ret = -1;
+    virCommandPtr cmd = NULL;
+
+    cmd = virCommandNew(OVSVSCTL);
+    virNetDevOpenvswitchAddTimeout(cmd);
+    virCommandAddArgList(cmd,
+                         "--", "--if-exists", "clear", "Port", ifname, "tag",
+                         "--", "--if-exists", "clear", "Port", ifname, "trunk",
+                         "--", "--if-exists", "clear", "Port", ifname, "vlan_mode",
+                         "--", "--if-exists", "set", "Port", ifname, NULL);
+
+    if (virNetDevOpenvswitchConstructVlans(cmd, virtVlan) < 0)
+        goto cleanup;
+
+    if (virCommandRun(cmd, NULL) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("Unable to set vlan configuration on port %s"), ifname);
+        goto cleanup;
+    }
+
+    ret = 0;
+ cleanup:
+    virCommandFree(cmd);
     return ret;
 }

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <body>
     <h1>Node devices XML format</h1>
 
     <ul id="toc"></ul>
 
-    <h2><a name="NodedevAttributes">Node Device XML</a></h2>
+    <h2><a id="NodedevAttributes">Node Device XML</a></h2>
 
     <p>
       There are several libvirt functions, all with the
@@ -324,11 +324,23 @@
               <code>render</code>.</dd>
             </dl>
           </dd>
+          <dt><code>ccw</code></dt>
+          <dd>Describes a Command Channel Word (CCW) device commonly found on
+          the S390 architecture. Sub-elements include:
+            <dl>
+              <dt><code>cssid</code></dt>
+              <dd>The channel subsystem identifier.</dd>
+              <dt><code>ssid</code></dt>
+              <dd>The subchannel-set identifier.</dd>
+              <dt><code>devno</code></dt>
+              <dd>The device number.</dd>
+            </dl>
+          </dd>
         </dl>
       </dd>
     </dl>
 
-    <h2><a name="nodeExample">Examples</a></h2>
+    <h2><a id="nodeExample">Examples</a></h2>
 
     <p>The following are some example node device XML outputs:</p>
     <pre>

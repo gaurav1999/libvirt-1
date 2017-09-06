@@ -6,7 +6,6 @@
   <flag name='kvm'/>
   <flag name='mem-path'/>
   <flag name='drive-serial'/>
-  <flag name='chardev'/>
   <flag name='monitor-json'/>
   <flag name='sdl'/>
   <flag name='netdev'/>
@@ -40,6 +39,7 @@
   <flag name='no-shutdown'/>
   <flag name='cache-unsafe'/>
   <flag name='ich9-ahci'/>
+  <flag name='no-acpi'/>
   <flag name='fsdev-readonly'/>
   <flag name='virtio-blk-pci.scsi'/>
   <flag name='drive-copy-on-read'/>
@@ -165,6 +165,13 @@
   <flag name='vhost-scsi'/>
   <flag name='drive-iotune-group'/>
   <flag name='query-cpu-definitions'/>
+  <flag name='block-write-threshold'/>
+  <flag name='query-named-block-nodes'/>
+  <flag name='kernel-irqchip'/>
+  <flag name='kernel-irqchip.split'/>
+  <flag name='vnc-multi-servers'/>
+  <flag name='chardev-reconnect'/>
+  <flag name='virtio-gpu.max_outputs'/>
   <version>2006000</version>
   <kvmVersion>0</kvmVersion>
   <package></package>

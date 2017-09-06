@@ -67,7 +67,7 @@ testCompareParseXML(const char *xmcfg, const char *xml)
                                       VIR_DOMAIN_DEF_PARSE_INACTIVE)))
         goto fail;
 
-    if (!virDomainDefCheckABIStability(def, def)) {
+    if (!virDomainDefCheckABIStability(def, def, xmlopt)) {
         fprintf(stderr, "ABI stability check failed on %s", xml);
         goto fail;
     }
@@ -115,7 +115,7 @@ testCompareFormatXML(const char *xmcfg, const char *xml)
     priv.caps = caps;
     conn->privateData = &priv;
 
-    if (!(conf = virConfReadMem(xmcfgData, strlen(xmcfgData), 0)))
+    if (!(conf = virConfReadString(xmcfgData, 0)))
         goto fail;
 
     if (!(def = xenParseXM(conf, caps, xmlopt)))
@@ -256,4 +256,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

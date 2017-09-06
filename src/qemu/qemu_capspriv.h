@@ -21,41 +21,27 @@
  * Author: Pavel Fedin <p.fedin@samsung.com>
  */
 
-#ifndef __QEMU_CAPSRIV_H_ALLOW__
+#ifndef __QEMU_CAPSPRIV_H_ALLOW__
 # error "qemu_capspriv.h may only be included by qemu_capabilities.c or test suites"
 #endif
 
 #ifndef __QEMU_CAPSPRIV_H__
 # define __QEMU_CAPSPRIV_H__
 
-struct _virQEMUCapsCache {
-    virMutex lock;
-    virHashTablePtr binaries;
-    char *libDir;
-    char *cacheDir;
-    uid_t runUid;
-    gid_t runGid;
-};
-
 virQEMUCapsPtr virQEMUCapsNewCopy(virQEMUCapsPtr qemuCaps);
 
 virQEMUCapsPtr
-virQEMUCapsNewForBinaryInternal(virCapsPtr caps,
+virQEMUCapsNewForBinaryInternal(virArch hostArch,
                                 const char *binary,
                                 const char *libDir,
-                                const char *cacheDir,
                                 uid_t runUid,
                                 gid_t runGid,
                                 bool qmpOnly);
 
-int virQEMUCapsLoadCache(virCapsPtr caps,
+int virQEMUCapsLoadCache(virArch hostArch,
                          virQEMUCapsPtr qemuCaps,
-                         const char *filename,
-                         time_t *selfctime,
-                         unsigned long *selfvers);
-char *virQEMUCapsFormatCache(virQEMUCapsPtr qemuCaps,
-                             time_t selfCTime,
-                             unsigned long selfVersion);
+                         const char *filename);
+char *virQEMUCapsFormatCache(virQEMUCapsPtr qemuCaps);
 
 int
 virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
@@ -75,13 +61,17 @@ virQEMUCapsSetVersion(virQEMUCapsPtr qemuCaps,
 
 void
 virQEMUCapsInitHostCPUModel(virQEMUCapsPtr qemuCaps,
-                            virCapsPtr caps,
+                            virArch hostArch,
                             virDomainVirtType type);
 
 int
 virQEMUCapsInitCPUModel(virQEMUCapsPtr qemuCaps,
                         virDomainVirtType type,
-                        virCPUDefPtr cpu);
+                        virCPUDefPtr cpu,
+                        bool migratable);
+
+void
+virQEMUCapsInitQMPBasicArch(virQEMUCapsPtr qemuCaps);
 
 void
 virQEMUCapsSetCPUModelInfo(virQEMUCapsPtr qemuCaps,
@@ -89,7 +79,26 @@ virQEMUCapsSetCPUModelInfo(virQEMUCapsPtr qemuCaps,
                            qemuMonitorCPUModelInfoPtr modelInfo);
 
 virCPUDefPtr
-virQEMUCapsProbeHostCPUForEmulator(virCapsPtr caps,
+virQEMUCapsProbeHostCPUForEmulator(virArch hostArch,
                                    virQEMUCapsPtr qemuCaps,
-                                   virDomainVirtType type);
+                                   virDomainVirtType type) ATTRIBUTE_NOINLINE;
+
+void
+virQEMUCapsSetGICCapabilities(virQEMUCapsPtr qemuCaps,
+                              virGICCapability *capabilities,
+                              size_t ncapabilities);
+
+int
+virQEMUCapsParseHelpStr(const char *qemu,
+                        const char *str,
+                        virQEMUCapsPtr qemuCaps,
+                        unsigned int *version,
+                        bool *is_kvm,
+                        unsigned int *kvm_version,
+                        bool check_yajl,
+                        const char *qmperr);
+
+int
+virQEMUCapsParseDeviceStr(virQEMUCapsPtr qemuCaps,
+                          const char *str);
 #endif

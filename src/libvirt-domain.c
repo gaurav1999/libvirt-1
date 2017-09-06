@@ -115,10 +115,6 @@ virConnectNumOfDomains(virConnectPtr conn)
  * reference counter on the connection is not increased by this
  * call.
  *
- * WARNING: When writing libvirt bindings in other languages, do
- * not use this function.  Instead, store the connection and
- * the domain object together.
- *
  * Returns the virConnectPtr or NULL in case of failure.
  */
 virConnectPtr
@@ -5820,7 +5816,7 @@ virDomainMemoryStats(virDomainPtr dom, virDomainMemoryStatPtr stats,
 int
 virDomainBlockPeek(virDomainPtr dom,
                    const char *disk,
-                   unsigned long long offset /* really 64 bits */,
+                   unsigned long long offset,
                    size_t size,
                    void *buffer,
                    unsigned int flags)
@@ -5956,7 +5952,7 @@ virDomainBlockResize(virDomainPtr dom,
  */
 int
 virDomainMemoryPeek(virDomainPtr dom,
-                    unsigned long long start /* really 64 bits */,
+                    unsigned long long start,
                     size_t size,
                     void *buffer,
                     unsigned int flags)
@@ -7010,7 +7006,8 @@ virDomainSetVcpus(virDomainPtr domain, unsigned int nvcpus)
  * CPU limit is altered; generally, this value must be less than or
  * equal to virConnectGetMaxVcpus().  Otherwise, this call affects the
  * current virtual CPU limit, which must be less than or equal to the
- * maximum limit.
+ * maximum limit. Note that hypervisors may not allow changing the maximum
+ * vcpu count if processor topology is specified.
  *
  * If @flags includes VIR_DOMAIN_VCPU_GUEST, then the state of processors is
  * modified inside the guest instead of the hypervisor. This flag can only
@@ -7954,7 +7951,7 @@ virDomainSetMetadata(virDomainPtr domain,
                                   "newlines"));
             goto error;
         }
-        /* fallthrough */
+        ATTRIBUTE_FALLTHROUGH;
     case VIR_DOMAIN_METADATA_DESCRIPTION:
         virCheckNullArgGoto(uri, error);
         virCheckNullArgGoto(key, error);
@@ -8702,7 +8699,9 @@ virDomainGetJobStats(virDomainPtr domain,
  * @domain: a domain object
  *
  * Requests that the current background job be aborted at the
- * soonest opportunity.
+ * soonest opportunity. In case the job is a migration in a post-copy mode,
+ * virDomainAbortJob will report an error (see virDomainMigrateStartPostCopy
+ * for more details).
  *
  * Returns 0 in case of success and -1 in case of failure.
  */
@@ -8766,6 +8765,47 @@ virDomainMigrateSetMaxDowntime(virDomainPtr domain,
 
     if (conn->driver->domainMigrateSetMaxDowntime) {
         if (conn->driver->domainMigrateSetMaxDowntime(domain, downtime, flags) < 0)
+            goto error;
+        return 0;
+    }
+
+    virReportUnsupportedError();
+ error:
+    virDispatchError(conn);
+    return -1;
+}
+
+
+/**
+ * virDomainMigrateGetMaxDowntime:
+ * @domain: a domain object
+ * @downtime: return value of the maximum tolerable downtime for live
+ *            migration, in milliseconds
+ * @flags: extra flags; not used yet, so callers should always pass 0
+ *
+ * Gets current maximum tolerable time for which the domain may be paused
+ * at the end of live migration.
+ *
+ * Returns 0 in case of success, -1 otherwise.
+ */
+int
+virDomainMigrateGetMaxDowntime(virDomainPtr domain,
+                               unsigned long long *downtime,
+                               unsigned int flags)
+{
+    virConnectPtr conn;
+
+    VIR_DOMAIN_DEBUG(domain, "downtime = %p, flags=%x", downtime, flags);
+
+    virResetLastError();
+
+    virCheckDomainReturn(domain, -1);
+    conn = domain->conn;
+
+    virCheckNonNullArgGoto(downtime, error);
+
+    if (conn->driver->domainMigrateGetMaxDowntime) {
+        if (conn->driver->domainMigrateGetMaxDowntime(domain, downtime, flags) < 0)
             goto error;
         return 0;
     }
@@ -8976,7 +9016,8 @@ virDomainMigrateGetMaxSpeed(virDomainPtr domain,
  * rolled back because none of the hosts has complete state. If this happens,
  * libvirt will leave the domain paused on both hosts with
  * VIR_DOMAIN_PAUSED_POSTCOPY_FAILED reason. It's up to the upper layer to
- * decide what to do in such case.
+ * decide what to do in such case. Because of this, libvirt will refuse to
+ * cancel post-copy migration via virDomainAbortJob.
  *
  * The following domain life cycle events are emitted during post-copy
  * migration:
@@ -9297,6 +9338,112 @@ virDomainManagedSaveRemove(virDomainPtr dom, unsigned int flags)
     return -1;
 }
 
+
+/**
+ * virDomainManagedSaveGetXMLDesc:
+ * @domain: a domain object
+ * @flags: bitwise-OR of subset of virDomainXMLFlags
+ *
+ * This method will extract the XML description of the managed save
+ * state file of a domain.
+ *
+ * No security-sensitive data will be included unless @flags contains
+ * VIR_DOMAIN_XML_SECURE; this flag is rejected on read-only
+ * connections.  For this API, @flags should not contain either
+ * VIR_DOMAIN_XML_INACTIVE or VIR_DOMAIN_XML_UPDATE_CPU.
+ *
+ * Returns a 0 terminated UTF-8 encoded XML instance, or NULL in case of
+ * error.  The caller must free() the returned value.
+ */
+char *
+virDomainManagedSaveGetXMLDesc(virDomainPtr domain, unsigned int flags)
+{
+    virConnectPtr conn;
+
+    VIR_DOMAIN_DEBUG(domain, "flags=%x", flags);
+
+    virResetLastError();
+
+    virCheckDomainReturn(domain, NULL);
+    conn = domain->conn;
+
+    if ((conn->flags & VIR_CONNECT_RO) && (flags & VIR_DOMAIN_XML_SECURE)) {
+        virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                       _("virDomainManagedSaveGetXMLDesc with secure flag"));
+        goto error;
+    }
+
+    if (conn->driver->domainManagedSaveGetXMLDesc) {
+        char *ret;
+        ret = conn->driver->domainManagedSaveGetXMLDesc(domain, flags);
+        if (!ret)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(domain->conn);
+    return NULL;
+}
+
+
+/**
+ * virDomainManagedSaveDefineXML:
+ * @domain: a domain object
+ * @dxml: XML config for adjusting guest xml used on restore
+ * @flags: bitwise-OR of virDomainSaveRestoreFlags
+ *
+ * This updates the definition of a domain stored in a saved state
+ * file.
+ *
+ * @dxml can be used to alter host-specific portions of the domain XML
+ * that will be used on the next start of the domain. For example, it is
+ * possible to alter the backing filename that is associated with a
+ * disk device.
+ *
+ * Normally, the saved state file will remember whether the domain was
+ * running or paused, and restore defaults to the same state.
+ * Specifying VIR_DOMAIN_SAVE_RUNNING or VIR_DOMAIN_SAVE_PAUSED in
+ * @flags will override the default saved into the file; omitting both
+ * leaves the file's default unchanged.  These two flags are mutually
+ * exclusive.
+ *
+ * Returns 0 in case of success and -1 in case of failure.
+ */
+int
+virDomainManagedSaveDefineXML(virDomainPtr domain, const char *dxml,
+                              unsigned int flags)
+{
+    virConnectPtr conn;
+
+    VIR_DOMAIN_DEBUG(domain, "flags=%x", flags);
+
+    virResetLastError();
+
+    VIR_EXCLUSIVE_FLAGS_GOTO(VIR_DOMAIN_SAVE_RUNNING,
+                             VIR_DOMAIN_SAVE_PAUSED,
+                             error);
+
+    virCheckDomainReturn(domain, -1);
+    conn = domain->conn;
+
+    if (conn->driver->domainManagedSaveDefineXML) {
+        int ret;
+        ret = conn->driver->domainManagedSaveDefineXML(domain, dxml, flags);
+
+        if (ret < 0)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(domain->conn);
+    return -1;
+}
 
 
 /**
@@ -10022,6 +10169,10 @@ virDomainBlockRebase(virDomainPtr dom, const char *disk,
  * Some hypervisors will restrict certain actions, such as virDomainSave()
  * or virDomainDetachDevice(), while a copy job is active; they may
  * also restrict a copy job to transient domains.
+ *
+ * If @flags contains VIR_DOMAIN_BLOCK_COPY_TRANSIENT_JOB the job will not be
+ * recoverable if the VM is turned off while job is active. This flag will
+ * remove the restriction of copy jobs to transient domains.
  *
  * The @disk parameter is either an unambiguous source name of the
  * block device (the <source file='...'/> sub-element, such as
@@ -11206,6 +11357,9 @@ virConnectGetDomainCapabilities(virConnectPtr conn,
  *                              backing image as unsigned long long.
  *     "block.<num>.physical" - physical size in bytes of the container of the
  *                              backing image as unsigned long long.
+ *     "block.<num>.threshold" - current threshold for delivering the
+ *                               VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD
+ *                               event in bytes. See virDomainSetBlockThreshold.
  *
  * VIR_DOMAIN_STATS_PERF:
  *     Return perf event statistics.
@@ -11811,6 +11965,62 @@ virDomainSetVcpu(virDomainPtr domain,
     if (domain->conn->driver->domainSetVcpu) {
         int ret;
         ret = domain->conn->driver->domainSetVcpu(domain, vcpumap, state, flags);
+        if (ret < 0)
+            goto error;
+        return ret;
+    }
+
+    virReportUnsupportedError();
+
+ error:
+    virDispatchError(domain->conn);
+    return -1;
+}
+
+
+/**
+ * virDomainSetBlockThreshold:
+ * @domain: pointer to domain object
+ * @dev: string specifying the block device or backing chain element
+ * @threshold: threshold in bytes when to fire the event
+ * @flags: currently unused, callers should pass 0
+ *
+ * Set the threshold level for delivering the
+ * VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD if the device or backing chain element
+ * described by @dev is written beyond the set threshold level. The threshold
+ * level is unset once the event fires. The event might not be delivered at all
+ * if libvirtd was not running at the moment when the threshold was reached.
+ *
+ * Hypervisors report the last written sector of an image in the bulk stats API
+ * (virConnectGetAllDomainStats/virDomainListGetStats) as
+ * "block.<num>.allocation" in the VIR_DOMAIN_STATS_BLOCK group. The current
+ * threshold value is reported as "block.<num>.threshold".
+ *
+ * This event allows to use thin-provisioned storage which needs management
+ * tools to grow it without the need for polling of the data.
+ *
+ * Returns 0 if the operation has started, -1 on failure.
+ */
+int
+virDomainSetBlockThreshold(virDomainPtr domain,
+                           const char *dev,
+                           unsigned long long threshold,
+                           unsigned int flags)
+{
+    VIR_DOMAIN_DEBUG(domain, "dev='%s' threshold=%llu flags=%x",
+                     NULLSTR(dev), threshold, flags);
+
+    virResetLastError();
+
+    virCheckDomainReturn(domain, -1);
+    virCheckReadOnlyGoto(domain->conn->flags, error);
+
+    virCheckNonNullArgGoto(dev, error);
+
+    if (domain->conn->driver->domainSetBlockThreshold) {
+        int ret;
+        ret = domain->conn->driver->domainSetBlockThreshold(domain, dev,
+                                                            threshold, flags);
         if (ret < 0)
             goto error;
         return ret;

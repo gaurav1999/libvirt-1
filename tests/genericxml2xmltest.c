@@ -99,6 +99,36 @@ mymain(void)
     DO_TEST("perf");
 
     DO_TEST("vcpus-individual");
+    DO_TEST("disk-network-http");
+
+    DO_TEST("cpu-cache-emulate");
+    DO_TEST("cpu-cache-passthrough");
+    DO_TEST("cpu-cache-disable");
+
+    DO_TEST_DIFFERENT("chardev-tcp");
+    DO_TEST_FULL("chardev-tcp-missing-host", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("chardev-tcp-missing-service", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("chardev-tcp-multiple-source", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_DIFFERENT("chardev-udp");
+    DO_TEST_FULL("chardev-udp-missing-connect-service", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("chardev-udp-multiple-source", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_DIFFERENT("chardev-unix");
+    DO_TEST_FULL("chardev-unix-smartcard-missing-path", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("chardev-unix-redirdev-missing-path", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("chardev-unix-rng-missing-path", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_DIFFERENT("chardev-reconnect");
+    DO_TEST_FULL("chardev-reconnect-missing-timeout", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
+    DO_TEST_FULL("chardev-reconnect-invalid-mode", 0, false,
+                 TEST_COMPARE_DOM_XML2XML_RESULT_FAIL_PARSE);
 
     virObjectUnref(caps);
     virObjectUnref(xmlopt);
@@ -106,4 +136,4 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

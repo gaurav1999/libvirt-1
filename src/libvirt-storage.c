@@ -36,10 +36,6 @@ VIR_LOG_INIT("libvirt.storage");
  * reference counter on the connection is not increased by this
  * call.
  *
- * WARNING: When writing libvirt bindings in other languages, do
- * not use this function.  Instead, store the connection and
- * the pool object together.
- *
  * Returns the virConnectPtr or NULL in case of failure.
  */
 virConnectPtr
@@ -1254,10 +1250,6 @@ virStoragePoolListVolumes(virStoragePoolPtr pool,
  * reference counter on the connection is not increased by this
  * call.
  *
- * WARNING: When writing libvirt bindings in other languages, do
- * not use this function.  Instead, store the connection and
- * the volume object together.
- *
  * Returns the virConnectPtr or NULL in case of failure.
  */
 virConnectPtr
@@ -1549,11 +1541,18 @@ virStorageVolCreateXMLFrom(virStoragePoolPtr pool,
  * @stream: stream to use as output
  * @offset: position in @vol to start reading from
  * @length: limit on amount of data to download
- * @flags: extra flags; not used yet, so callers should always pass 0
+ * @flags: bitwise-OR of virStorageVolDownloadFlags
  *
  * Download the content of the volume as a stream. If @length
  * is zero, then the remaining contents of the volume after
  * @offset will be downloaded.
+ *
+ * If VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM is set in @flags
+ * effective transmission of holes is enabled. This assumes using
+ * the @stream with combination of virStreamSparseRecvAll() or
+ * virStreamRecvFlags(stream, ..., flags =
+ * VIR_STREAM_RECV_STOP_AT_HOLE) for honouring holes sent by
+ * server.
  *
  * This call sets up an asynchronous stream; subsequent use of
  * stream APIs is necessary to transfer the actual data,
@@ -1613,13 +1612,18 @@ virStorageVolDownload(virStorageVolPtr vol,
  * @stream: stream to use as input
  * @offset: position to start writing to
  * @length: limit on amount of data to upload
- * @flags: extra flags; not used yet, so callers should always pass 0
+ * @flags: bitwise-OR of virStorageVolUploadFlags
  *
  * Upload new content to the volume from a stream. This call
  * will fail if @offset + @length exceeds the size of the
  * volume. Otherwise, if @length is non-zero, an error
  * will be raised if an attempt is made to upload greater
  * than @length bytes of data.
+ *
+ * If VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM is set in @flags
+ * effective transmission of holes is enabled. This assumes using
+ * the @stream with combination of virStreamSparseSendAll() or
+ * virStreamSendHole() to preserve source file sparseness.
  *
  * This call sets up an asynchronous stream; subsequent use of
  * stream APIs is necessary to transfer the actual data,

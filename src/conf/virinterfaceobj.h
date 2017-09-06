@@ -24,61 +24,65 @@
 
 typedef struct _virInterfaceObj virInterfaceObj;
 typedef virInterfaceObj *virInterfaceObjPtr;
-struct _virInterfaceObj {
-    virMutex lock;
-
-    bool active;           /* true if interface is active (up) */
-    virInterfaceDefPtr def; /* The interface definition */
-};
 
 typedef struct _virInterfaceObjList virInterfaceObjList;
 typedef virInterfaceObjList *virInterfaceObjListPtr;
-struct _virInterfaceObjList {
-    size_t count;
-    virInterfaceObjPtr *objs;
-};
-
-static inline bool
-virInterfaceObjIsActive(const virInterfaceObj *iface)
-{
-    return iface->active;
-}
-
-int
-virInterfaceObjFindByMACString(virInterfaceObjListPtr interfaces,
-                               const char *mac,
-                               virInterfaceObjPtr *matches, int maxmatches);
-
-virInterfaceObjPtr
-virInterfaceObjFindByName(virInterfaceObjListPtr interfaces,
-                          const char *name);
 
 void
-virInterfaceObjFree(virInterfaceObjPtr iface);
+virInterfaceObjEndAPI(virInterfaceObjPtr *obj);
+
+virInterfaceDefPtr
+virInterfaceObjGetDef(virInterfaceObjPtr obj);
+
+bool
+virInterfaceObjIsActive(virInterfaceObjPtr obj);
+
+void
+virInterfaceObjSetActive(virInterfaceObjPtr obj,
+                         bool active);
+
+virInterfaceObjListPtr
+virInterfaceObjListNew(void);
+
+int
+virInterfaceObjListFindByMACString(virInterfaceObjListPtr interfaces,
+                                   const char *mac,
+                                   char **const matches,
+                                   int maxmatches);
+
+virInterfaceObjPtr
+virInterfaceObjListFindByName(virInterfaceObjListPtr interfaces,
+                              const char *name);
+
+void
+virInterfaceObjFree(virInterfaceObjPtr obj);
 
 void
 virInterfaceObjListFree(virInterfaceObjListPtr vms);
 
-int
-virInterfaceObjListClone(virInterfaceObjListPtr src,
-                         virInterfaceObjListPtr dest);
+virInterfaceObjListPtr
+virInterfaceObjListClone(virInterfaceObjListPtr interfaces);
 
 virInterfaceObjPtr
-virInterfaceObjAssignDef(virInterfaceObjListPtr interfaces,
-                         virInterfaceDefPtr def);
+virInterfaceObjListAssignDef(virInterfaceObjListPtr interfaces,
+                             virInterfaceDefPtr def);
 
 void
-virInterfaceObjRemove(virInterfaceObjListPtr interfaces,
-                      virInterfaceObjPtr iface);
-
-void
-virInterfaceObjLock(virInterfaceObjPtr obj);
-
-void
-virInterfaceObjUnlock(virInterfaceObjPtr obj);
+virInterfaceObjListRemove(virInterfaceObjListPtr interfaces,
+                          virInterfaceObjPtr obj);
 
 typedef bool
 (*virInterfaceObjListFilter)(virConnectPtr conn,
                              virInterfaceDefPtr def);
+
+int
+virInterfaceObjListNumOfInterfaces(virInterfaceObjListPtr interfaces,
+                                   bool wantActive);
+
+int
+virInterfaceObjListGetNames(virInterfaceObjListPtr interfaces,
+                            bool wantActive,
+                            char **const names,
+                            int maxnames);
 
 #endif /* __VIRINTERFACEOBJ_H__ */

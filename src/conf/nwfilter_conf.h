@@ -570,10 +570,6 @@ int
 virNWFilterTriggerVMFilterRebuild(void);
 
 int
-virNWFilterSaveDef(const char *configDir,
-                   virNWFilterDefPtr def);
-
-int
 virNWFilterDeleteDef(const char *configDir,
                      virNWFilterDefPtr def);
 
@@ -585,17 +581,8 @@ char *
 virNWFilterDefFormat(const virNWFilterDef *def);
 
 int
-virNWFilterSaveXML(const char *configDir,
-                   virNWFilterDefPtr def,
-                   const char *xml);
-
-int
 virNWFilterSaveConfig(const char *configDir,
                       virNWFilterDefPtr def);
-
-char *
-virNWFilterConfigFile(const char *dir,
-                      const char *name);
 
 virNWFilterDefPtr
 virNWFilterDefParseString(const char *xml);

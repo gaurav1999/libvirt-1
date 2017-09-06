@@ -37,7 +37,7 @@
 #include "domain_audit.h"
 #include "domain_event.h"
 #include "snapshot_conf.h"
-#include "fdstream.h"
+#include "virfdstream.h"
 #include "storage_conf.h"
 #include "node_device_conf.h"
 #include "virdomainobjlist.h"
@@ -50,9 +50,9 @@
 #include "virstring.h"
 #include "cpu/cpu.h"
 #include "viraccessapicheck.h"
-#include "nodeinfo.h"
 #include "virhostcpu.h"
 #include "virhostmem.h"
+#include "virportallocator.h"
 #include "conf/domain_capabilities.h"
 
 #include "bhyve_conf.h"
@@ -571,9 +571,7 @@ bhyveDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flag
                                               VIR_DOMAIN_EVENT_DEFINED_ADDED :
                                               VIR_DOMAIN_EVENT_DEFINED_UPDATED);
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     virObjectUnref(caps);
@@ -818,9 +816,7 @@ bhyveDomainLookupByUUID(virConnectPtr conn,
     if (virDomainLookupByUUIDEnsureACL(conn, vm->def) < 0)
         goto cleanup;
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     if (vm)
@@ -846,9 +842,7 @@ static virDomainPtr bhyveDomainLookupByName(virConnectPtr conn,
     if (virDomainLookupByNameEnsureACL(conn, vm->def) < 0)
         goto cleanup;
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     virDomainObjEndAPI(&vm);
@@ -874,9 +868,7 @@ bhyveDomainLookupByID(virConnectPtr conn,
     if (virDomainLookupByIDEnsureACL(conn, vm->def) < 0)
         goto cleanup;
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     if (vm)
@@ -992,9 +984,7 @@ bhyveDomainCreateXML(virConnectPtr conn,
                                               VIR_DOMAIN_EVENT_STARTED,
                                               VIR_DOMAIN_EVENT_STARTED_BOOTED);
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     virObjectUnref(caps);
@@ -1207,12 +1197,12 @@ bhyveNodeGetMemoryStats(virConnectPtr conn,
 
 static int
 bhyveNodeGetInfo(virConnectPtr conn,
-                      virNodeInfoPtr nodeinfo)
+                 virNodeInfoPtr nodeinfo)
 {
     if (virNodeGetInfoEnsureACL(conn) < 0)
         return -1;
 
-    return nodeGetInfo(nodeinfo);
+    return virCapabilitiesGetNodeInfo(nodeinfo);
 }
 
 static int
@@ -1230,6 +1220,7 @@ bhyveStateCleanup(void)
     virObjectUnref(bhyve_driver->closeCallbacks);
     virObjectUnref(bhyve_driver->domainEventState);
     virObjectUnref(bhyve_driver->config);
+    virObjectUnref(bhyve_driver->remotePorts);
 
     virMutexDestroy(&bhyve_driver->lock);
     VIR_FREE(bhyve_driver);
@@ -1274,6 +1265,9 @@ bhyveStateInitialize(bool privileged,
         goto cleanup;
 
     if (!(bhyve_driver->domainEventState = virObjectEventStateNew()))
+        goto cleanup;
+
+    if (!(bhyve_driver->remotePorts = virPortAllocatorNew(_("display"), 5900, 65535, 0)))
         goto cleanup;
 
     bhyve_driver->hostsysinfo = virSysinfoRead();
@@ -1514,7 +1508,7 @@ bhyveConnectDomainEventDeregisterAny(virConnectPtr conn,
 
     if (virObjectEventStateDeregisterID(conn,
                                         privconn->domainEventState,
-                                        callbackID) < 0)
+                                        callbackID, true) < 0)
         return -1;
 
     return 0;

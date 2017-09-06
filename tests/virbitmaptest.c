@@ -589,10 +589,11 @@ test11(const void *opaque)
         virBitmapParse(data->res, &resmap, 256) < 0)
         goto cleanup;
 
-    virBitmapSubtract(amap, bmap);
+    virBitmapIntersect(amap, bmap);
 
     if (!virBitmapEqual(amap, resmap)) {
-        fprintf(stderr, "\n bitmap subtraction failed: '%s'-'%s'!='%s'\n",
+        fprintf(stderr,
+                "\n bitmap intersection failed: intersect('%s','%s') !='%s'\n",
                 data->a, data->b, data->res);
         goto cleanup;
     }
@@ -650,7 +651,7 @@ test12(const void *opaque ATTRIBUTE_UNUSED)
     TEST_MAP(151, "128");
 
     virBitmapFree(map);
-    if (virBitmapParseUnlimited("34,1023", &map) < 0)
+    if (!(map = virBitmapParseUnlimited("34,1023")))
         goto cleanup;
 
     TEST_MAP(1024, "34,1023");
@@ -700,13 +701,13 @@ mymain(void)
         ret = -1;
 
     virTestCounterReset("test11-");
-    TESTBINARYOP("0", "0", "0,^0", test11);
-    TESTBINARYOP("0-3", "0", "1-3", test11);
-    TESTBINARYOP("0-3", "0,3", "1-2", test11);
+    TESTBINARYOP("0", "0", "0", test11);
+    TESTBINARYOP("0-3", "0", "0", test11);
+    TESTBINARYOP("0-3", "0,3", "0,3", test11);
     TESTBINARYOP("0,^0", "0", "0,^0", test11);
-    TESTBINARYOP("0-3", "0-3", "0,^0", test11);
-    TESTBINARYOP("0-3", "0,^0", "0-3", test11);
-    TESTBINARYOP("0,2", "1,3", "0,2", test11);
+    TESTBINARYOP("0-3", "0-3", "0-3", test11);
+    TESTBINARYOP("0-3", "0,^0", "0,^0", test11);
+    TESTBINARYOP("0,2", "1,3", "0,^0", test11);
 
     if (virTestRun("test12", test12, NULL) < 0)
         ret = -1;
@@ -714,4 +715,4 @@ mymain(void)
     return ret;
 }
 
-VIRT_TEST_MAIN(mymain)
+VIR_TEST_MAIN(mymain)

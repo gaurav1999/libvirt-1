@@ -4,8 +4,8 @@
 #include <stdlib.h>
 
 #include "testutilsxen.h"
+#include "testutilshostcpus.h"
 #include "domain_conf.h"
-
 
 virCapsPtr testXenCapsInit(void)
 {
@@ -88,6 +88,9 @@ testXLInitCaps(void)
     if ((caps = virCapabilitiesNew(virArchFromHost(),
                                    false, false)) == NULL)
         return NULL;
+
+    caps->host.cpu = virCPUDefCopy(&cpuDefaultData);
+
     nmachines = ARRAY_CARDINALITY(x86_machines);
     if ((machines = virCapabilitiesAllocMachines(x86_machines, nmachines)) == NULL)
         goto cleanup;

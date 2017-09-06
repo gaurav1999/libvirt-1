@@ -1072,9 +1072,7 @@ libxlDomainCreateXML(virConnectPtr conn, const char *xml,
         goto endjob;
     }
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  endjob:
     libxlDomainObjEndJob(driver, vm);
@@ -1102,9 +1100,7 @@ libxlDomainLookupByID(virConnectPtr conn, int id)
     if (virDomainLookupByIDEnsureACL(conn, vm->def) < 0)
         goto cleanup;
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     if (vm)
@@ -1128,9 +1124,7 @@ libxlDomainLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
     if (virDomainLookupByUUIDEnsureACL(conn, vm->def) < 0)
         goto cleanup;
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     if (vm)
@@ -1154,9 +1148,7 @@ libxlDomainLookupByName(virConnectPtr conn, const char *name)
     if (virDomainLookupByNameEnsureACL(conn, vm->def) < 0)
         goto cleanup;
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
  cleanup:
     virDomainObjEndAPI(&vm);
@@ -2613,14 +2605,14 @@ libxlConnectDomainXMLFromNative(virConnectPtr conn,
         goto cleanup;
 
     if (STREQ(nativeFormat, XEN_CONFIG_FORMAT_XL)) {
-        if (!(conf = virConfReadMem(nativeConfig, strlen(nativeConfig), 0)))
+        if (!(conf = virConfReadString(nativeConfig, 0)))
             goto cleanup;
         if (!(def = xenParseXL(conf,
                                cfg->caps,
                                driver->xmlopt)))
             goto cleanup;
     } else if (STREQ(nativeFormat, XEN_CONFIG_FORMAT_XM)) {
-        if (!(conf = virConfReadMem(nativeConfig, strlen(nativeConfig), 0)))
+        if (!(conf = virConfReadString(nativeConfig, 0)))
             goto cleanup;
 
         if (!(def = xenParseXM(conf,
@@ -2825,9 +2817,7 @@ libxlDomainDefineXMLFlags(virConnectPtr conn, const char *xml, unsigned int flag
         goto cleanup;
     }
 
-    dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
-    if (dom)
-        dom->id = vm->def->id;
+    dom = virGetDomain(conn, vm->def->name, vm->def->uuid, vm->def->id);
 
     event = virDomainEventLifecycleNewFromObj(vm, VIR_DOMAIN_EVENT_DEFINED,
                                      !oldDef ?
@@ -5384,7 +5374,7 @@ libxlDomainBlockStatsVBD(virDomainObjPtr vm,
     int devno = libxlDiskPathToID(dev);
     int size;
     char *path, *name, *val;
-    unsigned long long stat;
+    unsigned long long status;
 
     path = name = val = NULL;
     if (devno < 0) {
@@ -5411,12 +5401,12 @@ libxlDomainBlockStatsVBD(virDomainObjPtr vm,
 # define LIBXL_SET_VBDSTAT(FIELD, VAR, MUL)           \
     if ((virAsprintf(&name, "%s/"FIELD, path) < 0) || \
         (virFileReadAll(name, 256, &val) < 0) ||      \
-        (sscanf(val, "%llu", &stat) != 1)) {          \
+        (sscanf(val, "%llu", &status) != 1)) {        \
         virReportError(VIR_ERR_OPERATION_FAILED,      \
                        _("cannot read %s"), name);    \
         goto cleanup;                                 \
     }                                                 \
-    VAR += (stat * MUL);                              \
+    VAR += (status * MUL);                            \
     VIR_FREE(name);                                   \
     VIR_FREE(val);
 
@@ -5662,7 +5652,7 @@ libxlConnectDomainEventDeregisterAny(virConnectPtr conn, int callbackID)
 
     if (virObjectEventStateDeregisterID(conn,
                                         driver->domainEventState,
-                                        callbackID) < 0)
+                                        callbackID, true) < 0)
         return -1;
 
     return 0;

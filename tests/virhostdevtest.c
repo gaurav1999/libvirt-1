@@ -73,8 +73,9 @@ myCleanup(void)
             virFileDeleteTree(mgr->stateDir);
 
         virObjectUnref(mgr->activePCIHostdevs);
-        virObjectUnref(mgr->inactivePCIHostdevs);
         virObjectUnref(mgr->activeUSBHostdevs);
+        virObjectUnref(mgr->inactivePCIHostdevs);
+        virObjectUnref(mgr->activeSCSIHostdevs);
         VIR_FREE(mgr->stateDir);
         VIR_FREE(mgr);
     }
@@ -87,7 +88,7 @@ myInit(void)
 
     for (i = 0; i < nhostdevs; i++) {
         virDomainHostdevSubsys subsys;
-        hostdevs[i] = virDomainHostdevDefAlloc(NULL);
+        hostdevs[i] = virDomainHostdevDefNew(NULL);
         if (!hostdevs[i])
             goto cleanup;
         hostdevs[i]->mode = VIR_DOMAIN_HOSTDEV_MODE_SUBSYS;
@@ -633,7 +634,7 @@ mymain(void)
     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-VIRT_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virpcimock.so")
+VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virpcimock.so")
 #else
 int
 main(void)

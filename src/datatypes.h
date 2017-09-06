@@ -472,8 +472,8 @@ struct _virConnect {
     virSecretDriverPtr secretDriver;
     virNWFilterDriverPtr nwfilterDriver;
 
-    /* Private data pointer which can be used by driver and
-     * network driver as they wish.
+    /* Private data pointer which can be used by domain driver as
+     * it pleases.
      * NB: 'private' is a reserved word in C++.
      */
     void *            privateData;
@@ -683,7 +683,8 @@ struct _virNWFilter {
 virConnectPtr virGetConnect(void);
 virDomainPtr virGetDomain(virConnectPtr conn,
                           const char *name,
-                          const unsigned char *uuid);
+                          const unsigned char *uuid,
+                          int id);
 virNetworkPtr virGetNetwork(virConnectPtr conn,
                             const char *name,
                             const unsigned char *uuid);

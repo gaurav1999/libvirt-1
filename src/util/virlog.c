@@ -32,6 +32,7 @@
 #include <unistd.h>
 #include <execinfo.h>
 #include <regex.h>
+#include <sys/uio.h>
 #if HAVE_SYSLOG_H
 # include <syslog.h>
 #endif
@@ -750,8 +751,10 @@ virLogNewOutputToFile(virLogPriority priority,
     virLogOutputPtr ret = NULL;
 
     fd = open(file, O_CREAT | O_APPEND | O_WRONLY, S_IRUSR | S_IWUSR);
-    if (fd < 0)
+    if (fd < 0) {
+        virReportSystemError(errno, _("failed to open %s"), file);
         return NULL;
+    }
 
     if (!(ret = virLogOutputNew(virLogOutputToFd, virLogCloseFd,
                                 (void *)(intptr_t)fd,
@@ -1836,6 +1839,13 @@ virLogSetOutputs(const char *src)
 
     if (src && *src)
         outputstr = src;
+
+    /* This can only happen during daemon init when the default output is not
+     * determined yet. It's safe to do, since it's the only place setting the
+     * default output.
+     */
+    if (!outputstr)
+        return 0;
 
     if ((noutputs = virLogParseOutputs(outputstr, &outputs)) < 0)
         goto cleanup;

@@ -33,8 +33,63 @@
 
 VIR_LOG_INIT("conf.virnwfilterobj");
 
+struct _virNWFilterObj {
+    virMutex lock;
 
-void
+    bool wantRemoved;
+
+    virNWFilterDefPtr def;
+    virNWFilterDefPtr newDef;
+};
+
+struct _virNWFilterObjList {
+    size_t count;
+    virNWFilterObjPtr *objs;
+};
+
+
+static virNWFilterObjPtr
+virNWFilterObjNew(void)
+{
+    virNWFilterObjPtr obj;
+
+    if (VIR_ALLOC(obj) < 0)
+        return NULL;
+
+    if (virMutexInitRecursive(&obj->lock) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "%s", _("cannot initialize mutex"));
+        VIR_FREE(obj);
+        return NULL;
+    }
+
+    virNWFilterObjLock(obj);
+    return obj;
+}
+
+
+virNWFilterDefPtr
+virNWFilterObjGetDef(virNWFilterObjPtr obj)
+{
+    return obj->def;
+}
+
+
+virNWFilterDefPtr
+virNWFilterObjGetNewDef(virNWFilterObjPtr obj)
+{
+    return obj->newDef;
+}
+
+
+bool
+virNWFilterObjWantRemoved(virNWFilterObjPtr obj)
+{
+    return obj->wantRemoved;
+}
+
+
+static void
 virNWFilterObjFree(virNWFilterObjPtr obj)
 {
     if (!obj)
@@ -56,21 +111,32 @@ virNWFilterObjListFree(virNWFilterObjListPtr nwfilters)
     for (i = 0; i < nwfilters->count; i++)
         virNWFilterObjFree(nwfilters->objs[i]);
     VIR_FREE(nwfilters->objs);
-    nwfilters->count = 0;
+    VIR_FREE(nwfilters);
+}
+
+
+virNWFilterObjListPtr
+virNWFilterObjListNew(void)
+{
+    virNWFilterObjListPtr nwfilters;
+
+    if (VIR_ALLOC(nwfilters) < 0)
+        return NULL;
+    return nwfilters;
 }
 
 
 void
-virNWFilterObjRemove(virNWFilterObjListPtr nwfilters,
-                     virNWFilterObjPtr nwfilter)
+virNWFilterObjListRemove(virNWFilterObjListPtr nwfilters,
+                         virNWFilterObjPtr obj)
 {
     size_t i;
 
-    virNWFilterObjUnlock(nwfilter);
+    virNWFilterObjUnlock(obj);
 
     for (i = 0; i < nwfilters->count; i++) {
         virNWFilterObjLock(nwfilters->objs[i]);
-        if (nwfilters->objs[i] == nwfilter) {
+        if (nwfilters->objs[i] == obj) {
             virNWFilterObjUnlock(nwfilters->objs[i]);
             virNWFilterObjFree(nwfilters->objs[i]);
 
@@ -83,16 +149,20 @@ virNWFilterObjRemove(virNWFilterObjListPtr nwfilters,
 
 
 virNWFilterObjPtr
-virNWFilterObjFindByUUID(virNWFilterObjListPtr nwfilters,
-                         const unsigned char *uuid)
+virNWFilterObjListFindByUUID(virNWFilterObjListPtr nwfilters,
+                             const unsigned char *uuid)
 {
     size_t i;
+    virNWFilterObjPtr obj;
+    virNWFilterDefPtr def;
 
     for (i = 0; i < nwfilters->count; i++) {
-        virNWFilterObjLock(nwfilters->objs[i]);
-        if (!memcmp(nwfilters->objs[i]->def->uuid, uuid, VIR_UUID_BUFLEN))
-            return nwfilters->objs[i];
-        virNWFilterObjUnlock(nwfilters->objs[i]);
+        obj = nwfilters->objs[i];
+        virNWFilterObjLock(obj);
+        def = obj->def;
+        if (!memcmp(def->uuid, uuid, VIR_UUID_BUFLEN))
+            return obj;
+        virNWFilterObjUnlock(obj);
     }
 
     return NULL;
@@ -100,26 +170,53 @@ virNWFilterObjFindByUUID(virNWFilterObjListPtr nwfilters,
 
 
 virNWFilterObjPtr
-virNWFilterObjFindByName(virNWFilterObjListPtr nwfilters,
-                         const char *name)
+virNWFilterObjListFindByName(virNWFilterObjListPtr nwfilters,
+                             const char *name)
 {
     size_t i;
+    virNWFilterObjPtr obj;
+    virNWFilterDefPtr def;
 
     for (i = 0; i < nwfilters->count; i++) {
-        virNWFilterObjLock(nwfilters->objs[i]);
-        if (STREQ_NULLABLE(nwfilters->objs[i]->def->name, name))
-            return nwfilters->objs[i];
-        virNWFilterObjUnlock(nwfilters->objs[i]);
+        obj = nwfilters->objs[i];
+        virNWFilterObjLock(obj);
+        def = obj->def;
+        if (STREQ_NULLABLE(def->name, name))
+            return obj;
+        virNWFilterObjUnlock(obj);
     }
 
     return NULL;
 }
 
 
+virNWFilterObjPtr
+virNWFilterObjListFindInstantiateFilter(virNWFilterObjListPtr nwfilters,
+                                        const char *filtername)
+{
+    virNWFilterObjPtr obj;
+
+    if (!(obj = virNWFilterObjListFindByName(nwfilters, filtername))) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("referenced filter '%s' is missing"), filtername);
+        return NULL;
+    }
+
+    if (virNWFilterObjWantRemoved(obj)) {
+        virReportError(VIR_ERR_NO_NWFILTER,
+                       _("Filter '%s' is in use."), filtername);
+        virNWFilterObjUnlock(obj);
+        return NULL;
+    }
+
+    return obj;
+}
+
+
 static int
-_virNWFilterObjDefLoopDetect(virNWFilterObjListPtr nwfilters,
-                             virNWFilterDefPtr def,
-                             const char *filtername)
+_virNWFilterObjListDefLoopDetect(virNWFilterObjListPtr nwfilters,
+                                 virNWFilterDefPtr def,
+                                 const char *filtername)
 {
     int rc = 0;
     size_t i;
@@ -138,12 +235,11 @@ _virNWFilterObjDefLoopDetect(virNWFilterObjListPtr nwfilters,
                 break;
             }
 
-            obj = virNWFilterObjFindByName(nwfilters,
-                                           entry->include->filterref);
+            obj = virNWFilterObjListFindByName(nwfilters,
+                                               entry->include->filterref);
             if (obj) {
-                rc = _virNWFilterObjDefLoopDetect(nwfilters,
-                                                  obj->def, filtername);
-
+                rc = _virNWFilterObjListDefLoopDetect(nwfilters, obj->def,
+                                                      filtername);
                 virNWFilterObjUnlock(obj);
                 if (rc < 0)
                     break;
@@ -156,7 +252,7 @@ _virNWFilterObjDefLoopDetect(virNWFilterObjListPtr nwfilters,
 
 
 /*
- * virNWFilterObjDefLoopDetect:
+ * virNWFilterObjListDefLoopDetect:
  * @nwfilters : the nwfilters to search
  * @def : the filter definition that may add a loop and is to be tested
  *
@@ -166,24 +262,24 @@ _virNWFilterObjDefLoopDetect(virNWFilterObjListPtr nwfilters,
  * Returns 0 in case no loop was detected, -1 otherwise.
  */
 static int
-virNWFilterObjDefLoopDetect(virNWFilterObjListPtr nwfilters,
-                            virNWFilterDefPtr def)
+virNWFilterObjListDefLoopDetect(virNWFilterObjListPtr nwfilters,
+                                virNWFilterDefPtr def)
 {
-    return _virNWFilterObjDefLoopDetect(nwfilters, def, def->name);
+    return _virNWFilterObjListDefLoopDetect(nwfilters, def, def->name);
 }
 
 
 int
-virNWFilterObjTestUnassignDef(virNWFilterObjPtr nwfilter)
+virNWFilterObjTestUnassignDef(virNWFilterObjPtr obj)
 {
     int rc = 0;
 
-    nwfilter->wantRemoved = 1;
+    obj->wantRemoved = true;
     /* trigger the update on VMs referencing the filter */
-    if (virNWFilterTriggerVMFilterRebuild())
+    if (virNWFilterTriggerVMFilterRebuild() < 0)
         rc = -1;
 
-    nwfilter->wantRemoved = 0;
+    obj->wantRemoved = false;
 
     return rc;
 }
@@ -222,96 +318,196 @@ virNWFilterDefEqual(const virNWFilterDef *def1,
 
 
 virNWFilterObjPtr
-virNWFilterObjAssignDef(virNWFilterObjListPtr nwfilters,
-                        virNWFilterDefPtr def)
+virNWFilterObjListAssignDef(virNWFilterObjListPtr nwfilters,
+                            virNWFilterDefPtr def)
 {
-    virNWFilterObjPtr nwfilter;
+    virNWFilterObjPtr obj;
+    virNWFilterDefPtr objdef;
 
-    nwfilter = virNWFilterObjFindByUUID(nwfilters, def->uuid);
+    if ((obj = virNWFilterObjListFindByUUID(nwfilters, def->uuid))) {
+        objdef = obj->def;
 
-    if (nwfilter) {
-        if (STRNEQ(def->name, nwfilter->def->name)) {
+        if (STRNEQ(def->name, objdef->name)) {
             virReportError(VIR_ERR_OPERATION_FAILED,
                            _("filter with same UUID but different name "
                              "('%s') already exists"),
-                           nwfilter->def->name);
-            virNWFilterObjUnlock(nwfilter);
+                           objdef->name);
+            virNWFilterObjUnlock(obj);
             return NULL;
         }
-        virNWFilterObjUnlock(nwfilter);
+        virNWFilterObjUnlock(obj);
     } else {
-        nwfilter = virNWFilterObjFindByName(nwfilters, def->name);
-        if (nwfilter) {
+        if ((obj = virNWFilterObjListFindByName(nwfilters, def->name))) {
             char uuidstr[VIR_UUID_STRING_BUFLEN];
-            virUUIDFormat(nwfilter->def->uuid, uuidstr);
+
+            objdef = obj->def;
+            virUUIDFormat(objdef->uuid, uuidstr);
             virReportError(VIR_ERR_OPERATION_FAILED,
                            _("filter '%s' already exists with uuid %s"),
                            def->name, uuidstr);
-            virNWFilterObjUnlock(nwfilter);
+            virNWFilterObjUnlock(obj);
             return NULL;
         }
     }
 
-    if (virNWFilterObjDefLoopDetect(nwfilters, def) < 0) {
+    if (virNWFilterObjListDefLoopDetect(nwfilters, def) < 0) {
         virReportError(VIR_ERR_OPERATION_FAILED,
                        "%s", _("filter would introduce a loop"));
         return NULL;
     }
 
 
-    if ((nwfilter = virNWFilterObjFindByName(nwfilters, def->name))) {
+    if ((obj = virNWFilterObjListFindByName(nwfilters, def->name))) {
 
-        if (virNWFilterDefEqual(def, nwfilter->def, false)) {
-            virNWFilterDefFree(nwfilter->def);
-            nwfilter->def = def;
-            return nwfilter;
+        objdef = obj->def;
+        if (virNWFilterDefEqual(def, objdef, false)) {
+            virNWFilterDefFree(objdef);
+            obj->def = def;
+            return obj;
         }
 
-        nwfilter->newDef = def;
+        obj->newDef = def;
         /* trigger the update on VMs referencing the filter */
-        if (virNWFilterTriggerVMFilterRebuild()) {
-            nwfilter->newDef = NULL;
-            virNWFilterObjUnlock(nwfilter);
+        if (virNWFilterTriggerVMFilterRebuild() < 0) {
+            obj->newDef = NULL;
+            virNWFilterObjUnlock(obj);
             return NULL;
         }
 
-        virNWFilterDefFree(nwfilter->def);
-        nwfilter->def = def;
-        nwfilter->newDef = NULL;
-        return nwfilter;
+        virNWFilterDefFree(objdef);
+        obj->def = def;
+        obj->newDef = NULL;
+        return obj;
     }
 
-    if (VIR_ALLOC(nwfilter) < 0)
+    if (!(obj = virNWFilterObjNew()))
         return NULL;
-
-    if (virMutexInitRecursive(&nwfilter->lock) < 0) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       "%s", _("cannot initialize mutex"));
-        VIR_FREE(nwfilter);
-        return NULL;
-    }
-    virNWFilterObjLock(nwfilter);
-    nwfilter->active = 0;
 
     if (VIR_APPEND_ELEMENT_COPY(nwfilters->objs,
-                                nwfilters->count, nwfilter) < 0) {
-        virNWFilterObjUnlock(nwfilter);
-        virNWFilterObjFree(nwfilter);
+                                nwfilters->count, obj) < 0) {
+        virNWFilterObjUnlock(obj);
+        virNWFilterObjFree(obj);
         return NULL;
     }
-    nwfilter->def = def;
+    obj->def = def;
 
-    return nwfilter;
+    return obj;
+}
+
+
+int
+virNWFilterObjListNumOfNWFilters(virNWFilterObjListPtr nwfilters,
+                                 virConnectPtr conn,
+                                 virNWFilterObjListFilter filter)
+{
+    size_t i;
+    int nfilters = 0;
+
+    for (i = 0; i < nwfilters->count; i++) {
+        virNWFilterObjPtr obj = nwfilters->objs[i];
+        virNWFilterObjLock(obj);
+        if (!filter || filter(conn, obj->def))
+            nfilters++;
+        virNWFilterObjUnlock(obj);
+    }
+
+    return nfilters;
+}
+
+
+int
+virNWFilterObjListGetNames(virNWFilterObjListPtr nwfilters,
+                           virConnectPtr conn,
+                           virNWFilterObjListFilter filter,
+                           char **const names,
+                           int maxnames)
+{
+    int nnames = 0;
+    size_t i;
+    virNWFilterDefPtr def;
+
+    for (i = 0; i < nwfilters->count && nnames < maxnames; i++) {
+        virNWFilterObjPtr obj = nwfilters->objs[i];
+        virNWFilterObjLock(obj);
+        def = obj->def;
+        if (!filter || filter(conn, def)) {
+            if (VIR_STRDUP(names[nnames], def->name) < 0) {
+                virNWFilterObjUnlock(obj);
+                goto failure;
+            }
+            nnames++;
+        }
+        virNWFilterObjUnlock(obj);
+    }
+
+    return nnames;
+
+ failure:
+    while (--nnames >= 0)
+        VIR_FREE(names[nnames]);
+
+    return -1;
+}
+
+
+int
+virNWFilterObjListExport(virConnectPtr conn,
+                         virNWFilterObjListPtr nwfilters,
+                         virNWFilterPtr **filters,
+                         virNWFilterObjListFilter filter)
+{
+    virNWFilterPtr *tmp_filters = NULL;
+    int nfilters = 0;
+    virNWFilterPtr nwfilter = NULL;
+    virNWFilterObjPtr obj = NULL;
+    virNWFilterDefPtr def;
+    size_t i;
+    int ret = -1;
+
+    if (!filters) {
+        ret = nwfilters->count;
+        goto cleanup;
+    }
+
+    if (VIR_ALLOC_N(tmp_filters, nwfilters->count + 1) < 0)
+        goto cleanup;
+
+    for (i = 0; i < nwfilters->count; i++) {
+        obj = nwfilters->objs[i];
+        virNWFilterObjLock(obj);
+        def = obj->def;
+        if (!filter || filter(conn, def)) {
+            if (!(nwfilter = virGetNWFilter(conn, def->name, def->uuid))) {
+                virNWFilterObjUnlock(obj);
+                goto cleanup;
+            }
+            tmp_filters[nfilters++] = nwfilter;
+        }
+        virNWFilterObjUnlock(obj);
+    }
+
+    *filters = tmp_filters;
+    tmp_filters = NULL;
+    ret = nfilters;
+
+ cleanup:
+    if (tmp_filters) {
+        for (i = 0; i < nfilters; i ++)
+            virObjectUnref(tmp_filters[i]);
+    }
+    VIR_FREE(tmp_filters);
+
+    return ret;
 }
 
 
 static virNWFilterObjPtr
-virNWFilterObjLoadConfig(virNWFilterObjListPtr nwfilters,
-                         const char *configDir,
-                         const char *name)
+virNWFilterObjListLoadConfig(virNWFilterObjListPtr nwfilters,
+                             const char *configDir,
+                             const char *name)
 {
     virNWFilterDefPtr def = NULL;
-    virNWFilterObjPtr nwfilter;
+    virNWFilterObjPtr obj;
     char *configFile = NULL;
 
     if (!(configFile = virFileBuildPath(configDir, name, ".xml")))
@@ -333,11 +529,11 @@ virNWFilterObjLoadConfig(virNWFilterObjListPtr nwfilters,
         virNWFilterSaveConfig(configDir, def) < 0)
         goto error;
 
-    if (!(nwfilter = virNWFilterObjAssignDef(nwfilters, def)))
+    if (!(obj = virNWFilterObjListAssignDef(nwfilters, def)))
         goto error;
 
     VIR_FREE(configFile);
-    return nwfilter;
+    return obj;
 
  error:
     VIR_FREE(configFile);
@@ -347,8 +543,8 @@ virNWFilterObjLoadConfig(virNWFilterObjListPtr nwfilters,
 
 
 int
-virNWFilterObjLoadAllConfigs(virNWFilterObjListPtr nwfilters,
-                             const char *configDir)
+virNWFilterObjListLoadAllConfigs(virNWFilterObjListPtr nwfilters,
+                                 const char *configDir)
 {
     DIR *dir;
     struct dirent *entry;
@@ -359,14 +555,14 @@ virNWFilterObjLoadAllConfigs(virNWFilterObjListPtr nwfilters,
         return rc;
 
     while ((ret = virDirRead(dir, &entry, configDir)) > 0) {
-        virNWFilterObjPtr nwfilter;
+        virNWFilterObjPtr obj;
 
         if (!virFileStripSuffix(entry->d_name, ".xml"))
             continue;
 
-        nwfilter = virNWFilterObjLoadConfig(nwfilters, configDir, entry->d_name);
-        if (nwfilter)
-            virNWFilterObjUnlock(nwfilter);
+        obj = virNWFilterObjListLoadConfig(nwfilters, configDir, entry->d_name);
+        if (obj)
+            virNWFilterObjUnlock(obj);
     }
 
     VIR_DIR_CLOSE(dir);
