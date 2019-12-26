@@ -1,0 +1,20 @@
+- https://libvirt.org/compiling.html
+- https://cvsweb.openbsd.org/cgi-bin/cvsweb/~checkout~/ports/sysutils/libvirt/Makefile
+
+```
+$ doas pkg_add automake-1.16.1 autoconf gettext-tools libxslt libtool unzip ectags gcc-8.3.0
+$ export AUTOCONF_VERSION=2.69 AUTOMAKE_VERSION=1.11
+$ git clone https://github.com/ligurio/libvirt
+$ cd libvirt
+$ git checkout -b openbsd-vmm
+$ git submodule init
+$ git submodule update
+$ NOCONFIGURE=1 CLEAN_SUBMODULE=1 GNULIB_SRCDIR=.gnulib/ ./autogen.sh --no-git --gnulib-srcdir .gnulib
+$ mkdir /usr/local/virtualenv/python3
+$ python3 -m venv /usr/local/virtualenv/python3
+$ . /usr/local/virtualenv/python3/bin/activate
+$ pip3 install rst2html5
+$ mkdir build; cd build
+$ ../configure --prefix=/opt/libvirt --with-openbsd-vmm
+$ gmake
+```

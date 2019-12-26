@@ -516,6 +516,9 @@ virshShowVersion(vshControl *ctl G_GNUC_UNUSED)
 #ifdef WITH_OPENVZ
     vshPrint(ctl, " OpenVZ");
 #endif
+#ifdef WITH_VMM
+    vshPrint(ctl, " OpenBSD VMM");
+#endif
 #ifdef WITH_VZ
     vshPrint(ctl, " Virtuozzo");
 #endif

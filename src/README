@@ -35,6 +35,7 @@ Then there are the hypervisor implementations:
  * test/         - A "mock" driver for testing
  * vbox/         - Virtual Box using native API
  * vmware/       - VMware Workstation and Player using the vmrun tool
+ * vmm/          - OpenBSD VMM
  * xen/          - Xen using hypercalls, XenD SEXPR & XenStore
 
 

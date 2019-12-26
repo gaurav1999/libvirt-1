@@ -69,6 +69,9 @@
 #ifdef WITH_OPENVZ
 # include "openvz/openvz_driver.h"
 #endif
+#ifdef WITH_VMM
+# include "vmm/vmm_driver.h"
+#endif
 #ifdef WITH_VMWARE
 # include "vmware/vmware_driver.h"
 #endif
@@ -281,6 +284,10 @@ virGlobalInit(void)
 #endif
 #ifdef WITH_OPENVZ
     if (openvzRegister() == -1)
+        goto error;
+#endif
+#ifdef WITH_VMM
+    if (vmmRegister() == -1)
         goto error;
 #endif
 #ifdef WITH_VMWARE

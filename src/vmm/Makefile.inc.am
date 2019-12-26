@@ -1,0 +1,30 @@
+# vim: filetype=automake
+
+VMM_DRIVER_SOURCES = \
+	vmm/vmm_conf.c \
+	vmm/vmm_conf.h \
+	vmm/vmm_driver.c \
+	vmm/vmm_driver.h \
+	vmm/vmm_util.c \
+	vmm/vmm_util.h \
+	$(NULL)
+
+DRIVER_SOURCE_FILES += $(addprefix $(srcdir)/,$(VMM_DRIVER_SOURCES))
+
+EXTRA_DIST += $(VMM_DRIVER_SOURCES)
+
+if WITH_VMM
+noinst_LTLIBRARIES += libvirt_driver_vmm.la
+libvirt_la_BUILT_LIBADD += libvirt_driver_vmm.la
+libvirt_driver_vmm_la_CFLAGS = \
+	-I$(srcdir)/conf \
+	$(AM_CFLAGS) \
+	$(NULL)
+libvirt_driver_vmm_la_SOURCES = $(VMM_DRIVER_SOURCES)
+endif WITH_VMM
+
+if WITH_VMM
+USED_SYM_FILES += $(srcdir)/libvirt_vmm.syms
+else ! WITH_VMM
+SYM_FILES += $(srcdir)/libvirt_vmm.syms
+endif ! WITH_VMM
